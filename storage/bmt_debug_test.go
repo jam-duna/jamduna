@@ -15,7 +15,7 @@ func TestDebugBeatreeReadback(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	storage, err := NewStateDBStorage(tmpDir, nil, nil, 0)
+	storage, err := NewStorageHub(tmpDir, nil, nil, 0)
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}

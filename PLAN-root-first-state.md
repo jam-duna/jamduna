@@ -12,7 +12,7 @@ This plan describes how to eliminate `CurrentUBT` and implement root-first state
 
 1. **Invalidate + Delete Doesn't Actually Clean Up Root Indexes**
    - `DiscardSnapshot(blockNumber)` deletes `pendingSnapshots[blockNumber]`
-   - But `blockRoots[blockNumber]` and `ubtRoots[rootHash]` still contain the polluted tree
+   - But `blockRoots[blockNumber]` still contains the polluted tree
    - `SetActiveTreeByRoot(root)` and `GetStateByRoot(root)` can still resolve the old root
    - Result: Resubmission can access polluted state
 
@@ -62,8 +62,8 @@ This plan describes how to eliminate `CurrentUBT` and implement root-first state
 ### Key Data Structures
 
 ```go
-// StateDBStorage changes
-type StateDBStorage struct {
+// StorageHub changes
+type StorageHub struct {
     // REMOVE: CurrentUBT *UnifiedBinaryTree
 
     // NEW: Canonical state is just "the tree at canonicalRoot"
@@ -103,15 +103,15 @@ type QueueItem struct {
 
 **Files**: `storage/storage.go`, `storage/witness.go`
 
-1. Add `canonicalRoot` field to `StateDBStorage`
-2. Add unified `treeStore` map replacing separate `ubtRoots`
+1. Add `canonicalRoot` field to `StorageHub`
+2. Add unified `treeStore` map replacing separate root maps
 3. Add helper methods:
    ```go
-   func (s *StateDBStorage) GetCanonicalRoot() common.Hash
-   func (s *StateDBStorage) SetCanonicalRoot(root common.Hash) error
-   func (s *StateDBStorage) GetTreeByRoot(root common.Hash) (*UnifiedBinaryTree, bool)
-   func (s *StateDBStorage) StoreTree(root common.Hash, tree *UnifiedBinaryTree)
-   func (s *StateDBStorage) CloneTreeFromRoot(root common.Hash) (*UnifiedBinaryTree, error)
+   func (s *StorageHub) GetCanonicalRoot() common.Hash
+   func (s *StorageHub) SetCanonicalRoot(root common.Hash) error
+   func (s *StorageHub) GetTreeByRoot(root common.Hash) (*UnifiedBinaryTree, bool)
+   func (s *StorageHub) StoreTree(root common.Hash, tree *UnifiedBinaryTree)
+   func (s *StorageHub) NewTreeFromRoot(root common.Hash) (*UnifiedBinaryTree, error)
    ```
 4. Keep `CurrentUBT` temporarily as a compatibility shim that reads from `treeStore[canonicalRoot]`
 
@@ -121,22 +121,22 @@ type QueueItem struct {
 
 1. Modify `CreateSnapshotForBlock` to require explicit `parentRoot` parameter:
    ```go
-   func (s *StateDBStorage) CreateSnapshotFromRoot(parentRoot common.Hash, blockNumber uint64) (common.Hash, error)
+   func (s *StorageHub) CreateSnapshotFromRoot(parentRoot common.Hash, blockNumber uint64) (common.Hash, error)
    ```
 
 2. Update `ApplyWritesToActiveSnapshot` to return new root:
    ```go
-   func (s *StateDBStorage) ApplyWritesToTree(root common.Hash, blob []byte) (newRoot common.Hash, err error)
+   func (s *StorageHub) ApplyWritesToTree(root common.Hash, blob []byte) (newRoot common.Hash, err error)
    ```
 
 3. Modify `CommitSnapshot` to update `canonicalRoot`:
    ```go
-   func (s *StateDBStorage) CommitAsCanonical(root common.Hash) error
+   func (s *StorageHub) CommitAsCanonical(root common.Hash) error
    ```
 
 4. Fix `DiscardSnapshot` to also remove from `treeStore`:
    ```go
-   func (s *StateDBStorage) DiscardTreeVersion(root common.Hash) bool
+   func (s *StorageHub) DiscardTreeVersion(root common.Hash) bool
    ```
 
 ### Phase 3: Update QueueItem to Carry Roots
@@ -198,7 +198,7 @@ type QueueItem struct {
 
 **Files**: `storage/storage.go`, `storage/witness.go`, `types/storage.go`
 
-1. Remove `CurrentUBT` field from `StateDBStorage`
+1. Remove `CurrentUBT` field from `StorageHub`
 
 2. Update all callers to use root-based access:
    - `GetActiveTree()` → `GetTreeByRoot(s.activeRoot)` (fallback to canonical)
@@ -249,8 +249,8 @@ During migration, maintain compatibility with:
 - [x] Implement `SetCanonicalRoot(root common.Hash) error`
 - [x] Implement `GetTreeByRoot(root common.Hash) (*UnifiedBinaryTree, bool)`
 - [x] Implement `StoreTree(root common.Hash, tree *UnifiedBinaryTree)`
-- [x] Implement `CloneTreeFromRoot(root common.Hash) (*UnifiedBinaryTree, error)`
-- [x] Update `NewStateDBStorage` to initialize new fields
+- [x] Implement `NewTreeFromRoot(root common.Hash) (*UnifiedBinaryTree, error)`
+- [x] Update `NewStorageHub` to initialize new fields
 - [x] Update `FetchBalance/Nonce/Code/Storage` to use `GetTreeByRoot(s.activeRoot)`
 - [x] Deprecate `CurrentUBT` getter (return `treeStore[canonicalRoot]`)
 - [ ] Remove `CurrentUBT` field (Phase 5)
@@ -274,7 +274,7 @@ During migration, maintain compatibility with:
 - [x] Add `GetCanonicalRoot() common.Hash`
 - [x] Add `SetCanonicalRoot(root common.Hash) error`
 - [x] Add `GetTreeByRoot(root common.Hash) (interface{}, bool)`
-- [x] Add `CloneTreeFromRoot(root common.Hash) (interface{}, error)`
+- [x] Add `NewTreeFromRoot(root common.Hash) (interface{}, error)`
 - [x] Add `ApplyWritesToTree(root common.Hash, blob []byte) (common.Hash, error)`
 - [x] Add `CommitAsCanonical(root common.Hash) error`
 - [x] Add `GetActiveRoot() common.Hash`
@@ -328,7 +328,7 @@ During migration, maintain compatibility with:
 
 ## Success Criteria
 
-1. `CurrentUBT` field completely removed from `StateDBStorage`
+1. `CurrentUBT` field completely removed from `StorageHub`
 2. All state access is by root hash
 3. `QueueItem` carries explicit `PreRoot` and `PostRoot`
 4. Resubmission creates fresh clone from correct parent root

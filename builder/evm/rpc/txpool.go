@@ -246,22 +246,20 @@ func (pool *TxPool) AssignBlockNumber(hashes []common.Hash, blockNumber uint64) 
 	for _, hash := range hashes {
 		entry, exists := pool.pending[hash]
 		if !exists {
-			// CRITICAL: Transaction should exist - it was locked by GetAndLockPendingTransactionsSorted
-			log.Error(log.Node, "CRITICAL BUG: Transaction not found in pool during AssignBlockNumber",
+			log.Error(log.Node, "BUG: Transaction not found in pool during AssignBlockNumber",
 				"txHash", hash.Hex(),
 				"blockNumber", blockNumber)
-			panic(fmt.Sprintf("TxPool: CRITICAL BUG - transaction %s not found in pool during AssignBlockNumber for block %d",
+			panic(fmt.Sprintf("TxPool: transaction %s not found during AssignBlockNumber for block %d",
 				hash.Hex(), blockNumber))
 		}
 
 		if entry.Status != TxStatusInBundle {
-			// CRITICAL: Transaction should be InBundle - it was locked by GetAndLockPendingTransactionsSorted
-			log.Error(log.Node, "CRITICAL BUG: Transaction has unexpected status during AssignBlockNumber",
+			log.Error(log.Node, "BUG: Transaction has unexpected status during AssignBlockNumber",
 				"txHash", hash.Hex(),
 				"status", entry.Status,
 				"expectedStatus", TxStatusInBundle,
 				"blockNumber", blockNumber)
-			panic(fmt.Sprintf("TxPool: CRITICAL BUG - transaction %s has status %d (expected %d) during AssignBlockNumber for block %d",
+			panic(fmt.Sprintf("TxPool: transaction %s has status %d (expected %d) during AssignBlockNumber for block %d",
 				hash.Hex(), entry.Status, TxStatusInBundle, blockNumber))
 		}
 
@@ -270,12 +268,12 @@ func (pool *TxPool) AssignBlockNumber(hashes []common.Hash, blockNumber uint64) 
 			entry.BlockNumber = blockNumber
 			updated++
 		} else if entry.BlockNumber != blockNumber {
-			// CRITICAL: Already assigned to a DIFFERENT block - this is a double-bundle bug!
-			log.Error(log.Node, "CRITICAL BUG: Transaction already assigned to different block",
+			// Already assigned to a different block - double-bundle bug
+			log.Error(log.Node, "BUG: Transaction already assigned to different block",
 				"txHash", hash.Hex(),
 				"existingBlock", entry.BlockNumber,
 				"newBlock", blockNumber)
-			panic(fmt.Sprintf("TxPool: CRITICAL BUG - transaction %s already assigned to block %d, cannot assign to block %d",
+			panic(fmt.Sprintf("TxPool: transaction %s already assigned to block %d, cannot assign to block %d",
 				hash.Hex(), entry.BlockNumber, blockNumber))
 		}
 		// else: same block number, idempotent - skip silently (updated not incremented)
@@ -573,14 +571,14 @@ func (pool *TxPool) LockTransactionsToBundle(hashes []common.Hash, blockNumber u
 					"hash", hash.Hex(),
 					"blockNumber", blockNumber)
 			} else if entry.Status == TxStatusInBundle {
-				// CRITICAL: Transaction already locked to a bundle
+				// Already locked to a bundle
 				if entry.BlockNumber != blockNumber {
-					// Different bundle - this is a bug! Same tx in two bundles = duplicate execution
-					log.Error(log.Node, "CRITICAL BUG: Transaction already locked to DIFFERENT bundle",
+					// Different bundle - duplicate execution bug
+					log.Error(log.Node, "BUG: Transaction already locked to different bundle",
 						"txHash", hash.Hex(),
 						"existingBundle", entry.BlockNumber,
 						"newBundle", blockNumber)
-					panic(fmt.Sprintf("TxPool: CRITICAL BUG - transaction %s already locked to bundle %d, cannot lock to bundle %d",
+					panic(fmt.Sprintf("TxPool: transaction %s already locked to bundle %d, cannot lock to bundle %d",
 						hash.Hex(), entry.BlockNumber, blockNumber))
 				}
 				// Same bundle - this is OK (idempotent), skip silently

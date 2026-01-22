@@ -71,7 +71,7 @@ func MakeJudgement(workreport types.WorkReport, auditPass bool, validatorindex u
 	return judgement
 }
 
-func MakeDisputes(store *storage.StateDBStorage, stf *statedb.StateTransition, validator_secrerts []types.ValidatorSecret, guarantees_history []types.Guarantee) (disputable bool, err error, dispute_stf *statedb.StateTransition) {
+func MakeDisputes(store *storage.StorageHub, stf *statedb.StateTransition, validator_secrerts []types.ValidatorSecret, guarantees_history []types.Guarantee) (disputable bool, err error, dispute_stf *statedb.StateTransition) {
 	disputable = false
 	dispute_stf = nil
 	// Check if the state transition is disputable
@@ -259,7 +259,7 @@ func main() {
 		}
 	}
 	// Make disputes
-	store, err := storage.NewStateDBStorage("/tmp/disputes", nil, nil, 0)
+	store, err := storage.NewStorageHub("/tmp/disputes", nil, nil, 0)
 	if err != nil {
 		log.Fatalf("Error creating storage: %v", err)
 	}

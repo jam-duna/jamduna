@@ -385,29 +385,35 @@ type TelemetryClient interface {
 	PeerMisbehaved(peerID [32]byte, reason string)
 }
 
-// JAMStorage defines the complete interface for JAM blockchain storage
-// This includes state management, service operations, data availability, and block storage
-type JAMStorage interface {
+// StorageSession defines the interface for isolated storage sessions.
+// Sessions are created via NewSession() and provide isolated trie views with:
+// - Independent root pointer (SetRoot on one session doesn't affect others)
+// - Independent staged operations (uncommitted changes are isolated)
+// - Shared committed state (all sessions read from the same committed nodes)
+//
+// This enables concurrent operations (auditor, authoring, importing) to work on
+// different state roots without race conditions.
+//
+// IMPORTANT: Session copies support type assertion to JAMStorage or EVMJAMStorage
+// when full interface access is needed (e.g., for EVM operations).
+type StorageSession interface {
+	// Core Trie Operations - key-value manipulation on the trie
 	Insert(key31 []byte, value []byte)
 	Delete(key []byte) error
 	Get(key []byte) ([]byte, bool, error)
 	Trace(key []byte) ([][]byte, error)
 	Flush() (common.Hash, error)
 
-	// State Operations - High-level state management for C1-C16
+	// Root Management - session-local root pointer
+	GetRoot() common.Hash
+	SetRoot(root common.Hash) error
+	OverlayRoot() (common.Hash, error) // Compute root from staged overlay without committing
+	ClearStagedOps()
+
+	// State Operations - high-level state management for C1-C16
 	SetStates(values [16][]byte)
 	GetStates() ([16][]byte, error)
 	GetAllKeyValues() []KeyVal
-	// TODO: make this a session
-	GetRoot() common.Hash
-	OverlayRoot() (common.Hash, error) // Compute root from staged overlay without committing (mirrors Rust Session::finish)
-	SetRoot(root common.Hash) error
-	ClearStagedOps()
-
-	// CloneTrieView creates an isolated view of the storage with its own trie Root pointer.
-	// This enables concurrent operations (auditor, authoring, importing) to work on
-	// different state roots without race conditions on the shared MerkleTree.Root.
-	CloneTrieView() JAMStorage
 
 	// Service Operations - per-service account data management
 	DeleteService(s uint32) error
@@ -424,11 +430,32 @@ type JAMStorage interface {
 	GetPreImageBlob(s uint32, blobHash common.Hash) (value []byte, ok bool, err error)
 	DeletePreImageBlob(s uint32, blobHash common.Hash) error
 
-	// Core KV Operations - Low-level key-value access
+	// Core KV Operations - low-level key-value access
 	ReadRawKV(key []byte) (value []byte, found bool, err error)
-	ReadRawKVWithPrefix(prefix []byte) ([][2][]byte, error)
 	WriteRawKV(key []byte, val []byte) error
 	ReadKV(key common.Hash) ([]byte, error)
+
+	// DA Fetch - segment retrieval for work package execution
+	FetchJAMDASegments(workPackageHash common.Hash, indexStart uint16, indexEnd uint16, payloadLength uint32) (payload []byte, err error)
+
+	// Telemetry - access to telemetry client
+	GetTelemetryClient() TelemetryClient
+
+	// Session Creation - create nested sessions
+	NewSession() StorageSession
+
+	// Lifecycle
+	Close() error
+}
+
+// JAMStorage defines the complete interface for JAM blockchain storage.
+// This includes state management, service operations, data availability, and block storage.
+// JAMStorage embeds StorageSession, so all session operations are available.
+type JAMStorage interface {
+	StorageSession
+
+	// Additional KV Operations not in StorageSession
+	ReadRawKVWithPrefix(prefix []byte) ([][2][]byte, error)
 
 	// Block Storage Operations
 	// These methods handle block persistence and retrieval with multiple indices
@@ -675,9 +702,9 @@ type EVMJAMStorage interface {
 	// Returns (tree, true) if found, (nil, false) if not.
 	GetTreeByRoot(root common.Hash) (interface{}, bool)
 
-	// CloneTreeFromRoot creates a deep copy of the tree at the given root.
+	// NewTreeFromRoot creates a new independent tree initialized from the state at the given root.
 	// Returns error if no tree exists at that root.
-	CloneTreeFromRoot(root common.Hash) (interface{}, error)
+	NewTreeFromRoot(root common.Hash) (interface{}, error)
 
 	// StoreTree stores a tree and returns its root hash.
 	StoreTree(tree interface{}) common.Hash

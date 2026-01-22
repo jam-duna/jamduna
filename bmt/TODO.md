@@ -11,7 +11,7 @@
   - Implemented `GenerateProof()` method for Nomt
   - Works with committed state (via beatreeWrapper.persistedData) and overlay
   - Temporarily rebuilds in-memory MerkleTree for BMT-compatible proof generation
-  - Used by `StateDBStorage.Trace()` for JAM witness generation
+  - Used by `StorageHub.Trace()` for JAM witness generation
   - See [Multi-Key Proof Documentation](docs/API.md#L621-L738) for usage patterns
 
 ### Beatree Package

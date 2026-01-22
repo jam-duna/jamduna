@@ -215,7 +215,7 @@ func StartFuzzingProducer(fuzzer *Fuzzer, output chan<- StateTransitionQA, baseS
 	log.Println("FUZZER: Finished generating all blocks.")
 }
 
-func (f *Fuzzer) FuzzSingleStf(store *storage.StateDBStorage, stf_org *statedb.StateTransition, modes []string) (*StateTransitionQA, error) {
+func (f *Fuzzer) FuzzSingleStf(store *storage.StorageHub, stf_org *statedb.StateTransition, modes []string) (*StateTransitionQA, error) {
 	stf := stf_org.DeepCopy()
 	if stf == nil {
 		return nil, fmt.Errorf("failed to copy STF")
@@ -751,7 +751,7 @@ type STFError struct {
 	Errors          []error
 }
 
-func selectImportBlocksErrorArr(seed []byte, store *storage.StateDBStorage, modes []string, stf *statedb.StateTransition, allowFuzzing bool) (stfErrors []STFError) {
+func selectImportBlocksErrorArr(seed []byte, store *storage.StorageHub, modes []string, stf *statedb.StateTransition, allowFuzzing bool) (stfErrors []STFError) {
 	oSlot, oEpoch, oPhase, mutatedSTFs, errorList := selectAllImportBlocksErrors(seed, store, modes, stf, allowFuzzing)
 	if len(mutatedSTFs) == 0 {
 		return nil
@@ -774,7 +774,7 @@ func (f *Fuzzer) ValidateStateTransitionChallengeResponse(stfQA *StateTransition
 	return validateStateTransitionChallengeResponse(f.store, stfQA, stfResp)
 }
 
-func validateStateTransitionChallengeResponse(db *storage.StateDBStorage, stfQA *StateTransitionQA, stfResp *StateTransitionResponse) (isMatch bool, validationErr error) {
+func validateStateTransitionChallengeResponse(db *storage.StorageHub, stfQA *StateTransitionQA, stfResp *StateTransitionResponse) (isMatch bool, validationErr error) {
 	challengerFuzzed := stfQA.Mutated
 	var challengerErrorMsg *string
 	if stfQA.Error != nil {
@@ -824,7 +824,7 @@ func validateStateTransitionChallengeResponse(db *storage.StateDBStorage, stfQA 
 	return false, nil
 }
 
-func lowlevelTrieInit(db *storage.StateDBStorage, snapshotRaw *statedb.StateSnapshotRaw) error {
+func lowlevelTrieInit(db *storage.StorageHub, snapshotRaw *statedb.StateSnapshotRaw) error {
 	expectedRoot := snapshotRaw.StateRoot
 	for _, kv := range snapshotRaw.KeyVals {
 		db.Insert(kv.Key[:], kv.Value)

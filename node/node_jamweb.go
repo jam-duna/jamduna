@@ -536,7 +536,7 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request, wg *sync.WaitGrou
 	go client.readPump(hub.ctx, wg)
 }
 
-func (n *NodeContent) RunApplyBlockAndWeb(ctx context.Context, blockDataDir string, port uint16, storage *storage.StateDBStorage) {
+func (n *NodeContent) RunApplyBlockAndWeb(ctx context.Context, blockDataDir string, port uint16, storage *storage.StorageHub) {
 	files, err := os.ReadDir(blockDataDir)
 	if err != nil {
 		log.Crit(log.Web, "ReadDir error", err)

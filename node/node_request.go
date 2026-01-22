@@ -147,7 +147,7 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, np_blockAnnouncemen
 	parentHeaderHash := np_blockAnnouncement.Header.ParentHeaderHash
 
 	// DEBUG: Log the state root we're trying to recover
-	log.Info(log.Node, "📨 processBlockAnnouncement: attempting state recovery",
+	log.Trace(log.Node, "📨 processBlockAnnouncement: attempting state recovery",
 		"nodeID", n.id,
 		"announcedSlot", newSlot,
 		"parentStateRoot", parentStateRoot.Hex()[:16],
@@ -156,7 +156,7 @@ func (n *Node) processBlockAnnouncement(ctx context.Context, np_blockAnnouncemen
 
 	// Check what state we currently have
 	if n.statedb != nil {
-		log.Info(log.Node, "📨 processBlockAnnouncement: current node state",
+		log.Trace(log.Node, "📨 processBlockAnnouncement: current node state",
 			"nodeID", n.id,
 			"currentStateRoot", n.statedb.StateRoot.Hex()[:16],
 			"currentSlot", n.statedb.GetSafrole().Timeslot)

@@ -352,7 +352,7 @@ func withCORS(h http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func initStorage(testDir string) (*storage.StateDBStorage, error) {
+func initStorage(testDir string) (*storage.StorageHub, error) {
 	if _, err := os.Stat(testDir); os.IsNotExist(err) {
 		err = os.MkdirAll(testDir, os.ModePerm)
 		if err != nil {
@@ -360,7 +360,7 @@ func initStorage(testDir string) (*storage.StateDBStorage, error) {
 		}
 	}
 
-	sdb_storage, err := storage.NewStateDBStorage(testDir, storage.NewMockJAMDA(), telemetry.NewNoOpTelemetryClient(), 0)
+	sdb_storage, err := storage.NewStorageHub(testDir, storage.NewMockJAMDA(), telemetry.NewNoOpTelemetryClient(), 0)
 	if err != nil {
 		return nil, fmt.Errorf("Error with storage: %v", err)
 	}

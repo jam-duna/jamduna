@@ -138,7 +138,7 @@ func GenSpec(dev DevConfig) (chainSpec *ChainSpec, err error) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	sdb, err := storage.NewStateDBStorage(tmpDir, storage.NewMockJAMDA(), telemetry.NewNoOpTelemetryClient(), 0)
+	sdb, err := storage.NewStorageHub(tmpDir, storage.NewMockJAMDA(), telemetry.NewNoOpTelemetryClient(), 0)
 	if err != nil {
 		return chainSpec, err
 	}

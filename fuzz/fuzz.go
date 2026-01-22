@@ -66,7 +66,7 @@ func CheckModes(mode string) (bool, error) {
 	return true, nil
 }
 
-func InitFuzzStorage(testDir string) (*storage.StateDBStorage, error) {
+func InitFuzzStorage(testDir string) (*storage.StorageHub, error) {
 	if _, err := os.Stat(testDir); os.IsNotExist(err) {
 		err = os.MkdirAll(testDir, os.ModePerm)
 		if err != nil {
@@ -74,7 +74,7 @@ func InitFuzzStorage(testDir string) (*storage.StateDBStorage, error) {
 		}
 	}
 
-	sdb_storage, err := storage.NewStateDBStorage(testDir, nil, nil, 0)
+	sdb_storage, err := storage.NewStorageHub(testDir, nil, nil, 0)
 	if err != nil {
 		return nil, fmt.Errorf("error with storage: %v", err)
 	}

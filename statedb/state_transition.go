@@ -21,11 +21,11 @@ const (
 	colorGreen = "\033[32m"
 )
 
-func InitStorage(testDir string) (*storage.StateDBStorage, error) {
+func InitStorage(testDir string) (*storage.StorageHub, error) {
 	return initStorage(testDir)
 }
 
-func initStorage(testDir string) (*storage.StateDBStorage, error) {
+func initStorage(testDir string) (*storage.StorageHub, error) {
 	if _, err := os.Stat(testDir); os.IsNotExist(err) {
 		err = os.MkdirAll(testDir, os.ModePerm)
 		if err != nil {
@@ -33,7 +33,7 @@ func initStorage(testDir string) (*storage.StateDBStorage, error) {
 		}
 	}
 
-	sdb_storage, err := storage.NewStateDBStorage(testDir, storage.NewMockJAMDA(), nil, 0)
+	sdb_storage, err := storage.NewStorageHub(testDir, storage.NewMockJAMDA(), nil, 0)
 	if err != nil {
 		return nil, fmt.Errorf("error with storage: %v", err)
 	}

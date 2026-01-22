@@ -479,9 +479,9 @@ func (s *StateDB) verifyPostStateAgainstExecution(workItem types.WorkItem, extri
 		return fmt.Errorf("post witness length mismatch: expected %d, got %d", workItem.Extrinsics[1].Len, len(postWitness))
 	}
 
-	stateStorage, ok := s.sdb.(*storage.StateDBStorage)
+	stateStorage, ok := s.sdb.(*storage.StorageHub)
 	if !ok {
-		return fmt.Errorf("unexpected storage type %T (need StateDBStorage)", s.sdb)
+		return fmt.Errorf("unexpected storage type %T (need StorageHub)", s.sdb)
 	}
 
 	// Use GetActiveTree() to get the correct tree for parallel bundle building
@@ -630,11 +630,14 @@ func (s *StateDB) loadContractWitnessFromNewFormat(serviceID uint32, output []by
 }
 
 // parseAndLoadContractStorage parses contract witness blob and loads into witness cache
-// The payload contains multiple entries: [20B address][1B kind][4B payload_length][4B tx_index][...payload...]
+	// The payload contains multiple entries: [20B address][1B kind][4B payload_length][4B tx_index][...payload...]
 func (s *StateDB) parseAndLoadContractStorage(serviceID uint32, payload []byte) error {
 	log.Trace(log.EVM, "parseAndLoadContractStorage", "serviceID", serviceID, "payloadLen", len(payload))
 
-	evmStorage := s.sdb.(types.EVMJAMStorage)
+	evmStorage, ok := s.sdb.(types.EVMJAMStorage)
+	if !ok {
+		return fmt.Errorf("parseAndLoadContractStorage: storage does not implement EVMJAMStorage")
+	}
 	evmStorage.InitWitnessCache()
 
 	offset := 0
@@ -1082,8 +1085,7 @@ func (s *StateDB) ExecuteWorkPackageBundleSteps(workPackageCoreIndex uint16, pac
 func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []types.ExtrinsicsBlobs, coreIndex uint16, rawObjectIDs []common.Hash, pvmBackend string, skipApplyWrites bool) (b *types.WorkPackageBundle, wr *types.WorkReport, err error) {
 	wp := workPackage.Clone()
 
-	// CRITICAL: Capture RefineContext BEFORE execution (used for witness verification)
-	// The state root here matches the root used when witnesses were fetched
+	// Capture RefineContext before execution for witness verification.
 	originalRefineContext := s.GetRefineContext()
 	wp.RefineContext = originalRefineContext
 	log.Trace(log.EVM, "BuildBundle:", "STATEROOT", wp.RefineContext.StateRoot)
@@ -1157,7 +1159,10 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 			contractWitnessBlobs[index] = contractWitnessBlob // Store for later application to main tree
 
 			// Build UBT witnesses - all UBT logic handled in storage
-			evmStorage := s.sdb.(types.EVMJAMStorage)
+			evmStorage, ok := s.sdb.(types.EVMJAMStorage)
+			if !ok {
+				return nil, nil, fmt.Errorf("BuildBundle: storage does not implement EVMJAMStorage")
+			}
 			ubtPreWitness, ubtPostWitness, err := evmStorage.BuildUBTWitness(contractWitnessBlob)
 			if err != nil {
 				log.Warn(log.EVM, "BuildUBTWitness failed", "err", err)
@@ -1284,8 +1289,7 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 		})
 	}
 
-	// Use buildBundle to fetch imported segments and justifications
-	// CRITICAL: Verify metadata count matches blob count before creating bundle
+	// Verify metadata count matches blob count before creating bundle.
 	for i, wi := range wp.WorkItems {
 		metadataCount := len(wi.Extrinsics)
 		blobCount := len(extrinsicsBlobs[i])
@@ -1334,7 +1338,10 @@ func (s *StateDB) BuildBundle(workPackage types.WorkPackage, extrinsicsBlobs []t
 	// Apply contract writes to the active UBT snapshot (if multi-snapshot mode is active)
 	// or store as pending writes for legacy deferred application.
 	// Skip if skipApplyWrites is true (Phase 2 mode - Phase 1 already applied writes).
-	evmStorage := s.sdb.(types.EVMJAMStorage)
+	evmStorage, ok := s.sdb.(types.EVMJAMStorage)
+	if !ok {
+		return nil, nil, fmt.Errorf("BuildBundle: storage does not implement EVMJAMStorage")
+	}
 	if !skipApplyWrites {
 		var totalBlobSize int
 		for _, blob := range contractWitnessBlobs {
@@ -1823,7 +1830,7 @@ func (s *StateDB) verifyUBTWitness(witness []byte, label string, kind storage.Wi
 	hasher := storage.NewBlake3Hasher(storage.JAMProfile)
 	var expectedRoot *[32]byte
 	if kind == storage.WitnessValuePre {
-		if stateStorage, ok := s.sdb.(*storage.StateDBStorage); ok {
+		if stateStorage, ok := s.sdb.(*storage.StorageHub); ok {
 			// Use GetActiveTreeTyped() to get the correct tree for parallel bundle building
 			// This returns the active snapshot if set, otherwise canonical
 			tree := stateStorage.GetActiveTreeTyped()

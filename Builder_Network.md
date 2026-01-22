@@ -317,13 +317,13 @@ The root-first storage model provides explicit pre/post roots per bundle:
 
 ```go
 // Disable UBT read logging for Phase 1 fast execution
-func (s *StateDBStorage) DisableUBTReadLog()
+func (s *StorageHub) DisableUBTReadLog()
 
 // Pin execution to a specific state root
-func (s *StateDBStorage) PinToStateRoot(root common.Hash) error
+func (s *StorageHub) PinToStateRoot(root common.Hash) error
 
 // Get canonical root without tree access
-func (s *StateDBStorage) GetCanonicalRoot() common.Hash
+func (s *StorageHub) GetCanonicalRoot() common.Hash
 ```
 
 ### Work Package Structure for Batched Blocks

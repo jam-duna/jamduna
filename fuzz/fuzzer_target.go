@@ -33,7 +33,7 @@ type Target struct {
 	listener      net.Listener
 	socketPath    string
 	targetInfo    PeerInfo
-	store         *storage.StateDBStorage     // Storage backend for the state database.
+	store         *storage.StorageHub     // Storage backend for the state database.
 	stateDB       *statedb.StateDB            // This can be used to manage state transitions.
 	stateDBMap    map[common.Hash]common.Hash // [headererHash]posteriorStateRoot
 	pvmBackend    string                      // Backend to use for state transitions, e.g., "Interpreter" or "Compiler".
@@ -47,7 +47,7 @@ type Target struct {
 // NewTarget creates a new target instance, armed with a specific test case.
 func NewTarget(socketPath string, targetInfo PeerInfo, pvmBackend string, debugState bool, dumpStf bool, dumpLocation string) *Target {
 	levelDBPath := fmt.Sprintf("/tmp/target_%d", time.Now().Unix())
-	store, err := storage.NewStateDBStorage(levelDBPath, nil, nil, 0)
+	store, err := storage.NewStorageHub(levelDBPath, nil, nil, 0)
 	if err != nil {
 		log.Fatalf("Failed to create state DB storage: %v", err)
 	}

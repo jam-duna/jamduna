@@ -10,7 +10,7 @@ import (
 )
 
 // StoreBundleSpecSegments stores bundle and segment data for guarantors
-func (s *StateDBStorage) StoreBundleSpecSegments(
+func (s *StorageHub) StoreBundleSpecSegments(
 	erasureRoot common.Hash,
 	exportedSegmentRoot common.Hash,
 	bChunks []types.DistributeECChunk,
@@ -61,7 +61,7 @@ func (s *StateDBStorage) StoreBundleSpecSegments(
 }
 
 // GetGuarantorMetadata retrieves erasure metadata for guarantors
-func (s *StateDBStorage) GetGuarantorMetadata(erasureRoot common.Hash) (
+func (s *StorageHub) GetGuarantorMetadata(erasureRoot common.Hash) (
 	bClubs []common.Hash,
 	sClubs []common.Hash,
 	bECChunks []types.DistributeECChunk,
@@ -108,7 +108,7 @@ func (s *StateDBStorage) GetGuarantorMetadata(erasureRoot common.Hash) (
 
 // GetFullShard retrieves full shard data for guarantors (used in CE137 responses)
 // Note: Justification generation happens in the node layer to avoid import cycles
-func (s *StateDBStorage) GetFullShard(erasureRoot common.Hash, shardIndex uint16) (
+func (s *StorageHub) GetFullShard(erasureRoot common.Hash, shardIndex uint16) (
 	bundleShard []byte,
 	segmentShards []byte,
 	justification []byte,
@@ -121,7 +121,7 @@ func (s *StateDBStorage) GetFullShard(erasureRoot common.Hash, shardIndex uint16
 }
 
 // StoreFullShardJustification stores shard justifications for assurers
-func (s *StateDBStorage) StoreFullShardJustification(
+func (s *StorageHub) StoreFullShardJustification(
 	erasureRoot common.Hash,
 	shardIndex uint16,
 	bClub common.Hash,
@@ -136,7 +136,7 @@ func (s *StateDBStorage) StoreFullShardJustification(
 }
 
 // GetFullShardJustification retrieves shard justifications for assurers
-func (s *StateDBStorage) GetFullShardJustification(erasureRoot common.Hash, shardIndex uint16) (
+func (s *StorageHub) GetFullShardJustification(erasureRoot common.Hash, shardIndex uint16) (
 	bClubH common.Hash,
 	sClubH common.Hash,
 	encodedPath []byte,
@@ -160,7 +160,7 @@ func (s *StateDBStorage) GetFullShardJustification(erasureRoot common.Hash, shar
 }
 
 // StoreAuditDA stores bundle shard for short-term audit (assurer role)
-func (s *StateDBStorage) StoreAuditDA(erasureRoot common.Hash, shardIndex uint16, bundleShard []byte) error {
+func (s *StorageHub) StoreAuditDA(erasureRoot common.Hash, shardIndex uint16, bundleShard []byte) error {
 	b_es_key := GenerateErasureRootShardIdxKey("b", erasureRoot, shardIndex)
 	s.WriteRawKV([]byte(b_es_key), bundleShard)
 	log.Trace(log.DA, "StoreAuditDA", "b_es_key", b_es_key, "bundleShard", bundleShard)
@@ -168,14 +168,14 @@ func (s *StateDBStorage) StoreAuditDA(erasureRoot common.Hash, shardIndex uint16
 }
 
 // StoreImportDA stores segment shards for long-term import (assurer role, at least 672 epochs)
-func (s *StateDBStorage) StoreImportDA(erasureRoot common.Hash, shardIndex uint16, concatenatedShards []byte) error {
+func (s *StorageHub) StoreImportDA(erasureRoot common.Hash, shardIndex uint16, concatenatedShards []byte) error {
 	s_es_key := GenerateErasureRootShardIdxKey("s", erasureRoot, shardIndex)
 	s.WriteRawKV([]byte(s_es_key), concatenatedShards) // includes segment shards AND proof page shards
 	return nil
 }
 
 // GetBundleShard retrieves bundle shard for assurers (used in CE138 responses)
-func (s *StateDBStorage) GetBundleShard(erasureRoot common.Hash, shardIndex uint16) (
+func (s *StorageHub) GetBundleShard(erasureRoot common.Hash, shardIndex uint16) (
 	bundleShard []byte,
 	sClub common.Hash,
 	justification []byte,
@@ -197,7 +197,7 @@ func (s *StateDBStorage) GetBundleShard(erasureRoot common.Hash, shardIndex uint
 }
 
 // GetSegmentShard retrieves segment shards for assurers (used in CE139/CE140 responses)
-func (s *StateDBStorage) GetSegmentShard(erasureRoot common.Hash, shardIndex uint16) (
+func (s *StorageHub) GetSegmentShard(erasureRoot common.Hash, shardIndex uint16) (
 	concatenatedShards []byte,
 	ok bool,
 	err error,
@@ -214,7 +214,7 @@ func (s *StateDBStorage) GetSegmentShard(erasureRoot common.Hash, shardIndex uin
 }
 
 // GetBundleByErasureRoot retrieves bundle by erasure root
-func (s *StateDBStorage) GetBundleByErasureRoot(erasureRoot common.Hash) (types.WorkPackageBundle, bool) {
+func (s *StorageHub) GetBundleByErasureRoot(erasureRoot common.Hash) (types.WorkPackageBundle, bool) {
 	erasure_bundleKey := fmt.Sprintf("erasureBundle-%v", erasureRoot)
 	bundleBytes, ok, err := s.ReadRawKV([]byte(erasure_bundleKey))
 	if err != nil || !ok {
@@ -229,7 +229,7 @@ func (s *StateDBStorage) GetBundleByErasureRoot(erasureRoot common.Hash) (types.
 }
 
 // GetSegmentsBySegmentRoot retrieves segments by segment root
-func (s *StateDBStorage) GetSegmentsBySegmentRoot(segmentRoot common.Hash) ([][]byte, bool) {
+func (s *StorageHub) GetSegmentsBySegmentRoot(segmentRoot common.Hash) ([][]byte, bool) {
 	segmentsKey := fmt.Sprintf("erasureSegments-%v", segmentRoot)
 	encodedSegments, ok, err := s.ReadRawKV([]byte(segmentsKey))
 	if err != nil || !ok {

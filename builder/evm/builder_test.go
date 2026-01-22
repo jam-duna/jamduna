@@ -71,7 +71,10 @@ func TestEVMBlocksTransfersLocal(t *testing.T) {
 		os.Exit(1)
 	}
 	defer storage.Close()
-	evmstorage := storage.(types.EVMJAMStorage)
+	evmstorage, ok := storage.(types.EVMJAMStorage)
+	if !ok {
+		t.Fatal("storage does not implement EVMJAMStorage")
+	}
 	fmt.Printf("✓ Builder node created\n")
 	log.InitLogger("debug")
 	serviceID := uint32(0)

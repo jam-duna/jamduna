@@ -43,7 +43,7 @@ func TestSnapshotIntegrityRejection(t *testing.T) {
 	hashBytes := tree.Hash().Bytes()
 	correctRoot := common.BytesToHash(hashBytes[:])
 
-	storage := &StateDBStorage{}
+	storage := &StorageHub{}
 	tmpDir := t.TempDir()
 	snapshotPath := filepath.Join(tmpDir, "snapshot.gz")
 	err := storage.ExportSnapshot(tree, 100, snapshotPath)
@@ -84,7 +84,7 @@ func TestSnapshotRoundtrip(t *testing.T) {
 	origRoot := common.BytesToHash(origHashBytes[:])
 
 	// Export snapshot
-	storage := &StateDBStorage{}
+	storage := &StorageHub{}
 	tmpDir := t.TempDir()
 	snapshotPath := filepath.Join(tmpDir, "snapshot_roundtrip.gz")
 
@@ -155,7 +155,7 @@ func TestReplayToHead(t *testing.T) {
 	loader := mockBlockLoader(blocks)
 
 	// Replay from snapshot (100) to head (103)
-	storage := &StateDBStorage{}
+	storage := &StorageHub{}
 	replayedTree, err := storage.ReplayToHead(snapshotTree, 100, 103, loader)
 	require.NoError(t, err)
 	require.NotNil(t, replayedTree)
@@ -187,7 +187,7 @@ func TestReplayToHeadNoReplayNeeded(t *testing.T) {
 	}
 	loader := mockBlockLoader(blocks)
 
-	storage := &StateDBStorage{}
+	storage := &StorageHub{}
 	replayedTree, err := storage.ReplayToHead(snapshotTree, 100, 100, loader)
 	require.NoError(t, err)
 
@@ -211,7 +211,7 @@ func TestReplayToHeadMissingDelta(t *testing.T) {
 	}
 	loader := mockBlockLoader(blocks)
 
-	storage := &StateDBStorage{}
+	storage := &StorageHub{}
 	_, err := storage.ReplayToHead(snapshotTree, 100, 101, loader)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing verkle delta", "Should error on missing delta")
@@ -221,7 +221,7 @@ func TestReplayToHeadMissingDelta(t *testing.T) {
 
 // TestColdStart verifies full cold start process
 func TestColdStart(t *testing.T) {
-	storage := &StateDBStorage{}
+	storage := &StorageHub{}
 	tmpDir := t.TempDir()
 	snapshotPath := filepath.Join(tmpDir, "cold_start.gz")
 
@@ -313,7 +313,7 @@ func TestColdStartNoReplay(t *testing.T) {
 	snapshotHashBytes := snapshotTree.Hash().Bytes()
 	snapshotRoot := common.BytesToHash(snapshotHashBytes[:])
 
-	storage := &StateDBStorage{}
+	storage := &StorageHub{}
 	tmpDir := t.TempDir()
 	snapshotPath := filepath.Join(tmpDir, "cold_start_no_replay.gz")
 

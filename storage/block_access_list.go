@@ -489,7 +489,7 @@ func assembleAccountChanges(
 // 5. Sort and deduplicate
 // 6. Return BlockAccessList with proper ordering
 //
-// CRITICAL: Uses witness metadata only - guarantor can call this without execution state
+// Note: Uses witness metadata only - guarantor can call this without execution state.
 func BuildBlockAccessList(
 	preStateWitness []byte,
 	postStateWitness []byte,

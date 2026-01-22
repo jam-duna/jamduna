@@ -23,7 +23,7 @@ type SnapshotMetadata struct {
 }
 
 // LoadFromSnapshot initializes a UBT tree from a compressed key-value snapshot.
-func (s *StateDBStorage) LoadFromSnapshot(
+func (s *StorageHub) LoadFromSnapshot(
 	snapshotPath string,
 	snapshotHeight uint64,
 	expectedRoot common.Hash,
@@ -83,7 +83,7 @@ func (s *StateDBStorage) LoadFromSnapshot(
 }
 
 // ReplayToHead replays deltas from snapshot to current head
-func (s *StateDBStorage) ReplayToHead(
+func (s *StorageHub) ReplayToHead(
 	snapshotTree *UnifiedBinaryTree,
 	snapshotHeight uint64,
 	headHeight uint64,
@@ -98,7 +98,7 @@ func (s *StateDBStorage) ReplayToHead(
 		return snapshotTree, nil
 	}
 
-	// CRITICAL: Copy snapshot tree to avoid mutating pinned checkpoint
+	// Copy snapshot tree to avoid mutating pinned checkpoint.
 	currentTree := snapshotTree.Copy()
 
 	// Replay each block from snapshot+1 to head
@@ -132,8 +132,8 @@ func (s *StateDBStorage) ReplayToHead(
 		}
 	}
 
-	// CRITICAL: Verify final tree root matches head block root
-	// (Each iteration validates per-block root, but this is a final sanity check)
+	// Verify final tree root matches head block root.
+	// Each iteration validates per-block root, but this is a final sanity check.
 	headBlock, err := blockLoader(headHeight)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load head block %d for validation: %w", headHeight, err)
@@ -156,7 +156,7 @@ func (s *StateDBStorage) ReplayToHead(
 }
 
 // ExportSnapshot creates compressed key-value snapshot from checkpoint
-func (s *StateDBStorage) ExportSnapshot(
+func (s *StorageHub) ExportSnapshot(
 	tree *UnifiedBinaryTree,
 	height uint64,
 	outputPath string,
@@ -229,7 +229,7 @@ func extractAllKeysFromTree(tree *UnifiedBinaryTree) (*evmtypes.UBTStateDelta, e
 }
 
 // ColdStart performs full cold start from snapshot file
-func (s *StateDBStorage) ColdStart(
+func (s *StorageHub) ColdStart(
 	snapshotPath string,
 	snapshotHeight uint64,
 	expectedRoot common.Hash,

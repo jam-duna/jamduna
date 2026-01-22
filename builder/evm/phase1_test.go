@@ -103,7 +103,10 @@ func TestMultiSnapshotUBT(t *testing.T) {
 		t.Fatalf("Failed to get storage: %v", err)
 	}
 	defer storage.Close()
-	evmstorage := storage.(types.EVMJAMStorage)
+	evmstorage, ok := storage.(types.EVMJAMStorage)
+	if !ok {
+		t.Fatal("storage does not implement EVMJAMStorage")
+	}
 
 	// Setup service
 	serviceID := uint32(0)
@@ -489,9 +492,9 @@ func TestMultiSnapshotUBT(t *testing.T) {
 
 func TestRootFirstResubmissionIsolation(t *testing.T) {
 	tmpDir := t.TempDir()
-	store, err := storage.NewStateDBStorage(tmpDir, storage.NewMockJAMDA(), nil, 0)
+	store, err := storage.NewStorageHub(tmpDir, storage.NewMockJAMDA(), nil, 0)
 	if err != nil {
-		t.Fatalf("NewStateDBStorage failed: %v", err)
+		t.Fatalf("NewStorageHub failed: %v", err)
 	}
 	defer store.Close()
 
@@ -585,7 +588,10 @@ func TestPhase1ExecutionOnly(t *testing.T) {
 		t.Fatalf("Failed to get storage: %v", err)
 	}
 	defer storage.Close()
-	evmstorage := storage.(types.EVMJAMStorage)
+	evmstorage, ok := storage.(types.EVMJAMStorage)
+	if !ok {
+		t.Fatal("storage does not implement EVMJAMStorage")
+	}
 	log.InitLogger("debug")
 
 	serviceID := uint32(0)

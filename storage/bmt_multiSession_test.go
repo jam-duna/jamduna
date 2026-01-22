@@ -72,7 +72,7 @@ func TestMultiSessionPersistence(t *testing.T) {
 	fmt.Println("\n--- SESSION 1: Insert first 3 keys ---")
 	session1Data := allData[0:3]
 
-	storage1, err := NewStateDBStorage(tmpDir, nil, nil, 0)
+	storage1, err := NewStorageHub(tmpDir, nil, nil, 0)
 	if err != nil {
 		t.Fatalf("Session 1: Failed to create storage: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestMultiSessionPersistence(t *testing.T) {
 	// ========== SESSION 2: Reopen and insert next 3 keys ==========
 	fmt.Println("\n--- SESSION 2: Reopen and insert keys 3-5 ---")
 
-	storage2, err := NewStateDBStorage(tmpDir, nil, nil, 0)
+	storage2, err := NewStorageHub(tmpDir, nil, nil, 0)
 	if err != nil {
 		t.Fatalf("Session 2: Failed to reopen storage: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestMultiSessionPersistence(t *testing.T) {
 	// ========== SESSION 3: Reopen and insert next 3 keys ==========
 	fmt.Println("\n--- SESSION 3: Reopen and insert keys 6-8 ---")
 
-	storage3, err := NewStateDBStorage(tmpDir, nil, nil, 0)
+	storage3, err := NewStorageHub(tmpDir, nil, nil, 0)
 	if err != nil {
 		t.Fatalf("Session 3: Failed to reopen storage: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestMultiSessionPersistence(t *testing.T) {
 	// ========== SESSION 4: Reopen and insert final 2 keys ==========
 	fmt.Println("\n--- SESSION 4: Reopen and insert final keys 9-10 ---")
 
-	storage4, err := NewStateDBStorage(tmpDir, nil, nil, 0)
+	storage4, err := NewStorageHub(tmpDir, nil, nil, 0)
 	if err != nil {
 		t.Fatalf("Session 4: Failed to reopen storage: %v", err)
 	}
@@ -369,7 +369,7 @@ func TestMultiSessionPersistence(t *testing.T) {
 	// ========== SESSION 5: Final verification ==========
 	fmt.Println("\n--- SESSION 5: Final verification ---")
 
-	storage5, err := NewStateDBStorage(tmpDir, nil, nil, 0)
+	storage5, err := NewStorageHub(tmpDir, nil, nil, 0)
 	if err != nil {
 		t.Fatalf("Session 5: Failed to reopen storage: %v", err)
 	}

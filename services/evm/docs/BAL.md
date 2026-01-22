@@ -976,7 +976,7 @@ func (vm *VM) fetchBalance(stateDB *StateDB, address common.Address, outputPtr u
 Update Fetch* methods to accept and use txIndex:
 
 ```go
-func (store *StateDBStorage) FetchBalance(address common.Address, txIndex uint32) ([32]byte, error) {
+func (store *StorageHub) FetchBalance(address common.Address, txIndex uint32) ([32]byte, error) {
     var balance [32]byte
 
     tree := store.GetActiveTreeTyped()

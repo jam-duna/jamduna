@@ -396,7 +396,7 @@ func NewBlockFromFile(blockfilename string) *types.Block {
 	return &b
 }
 
-func NewStateDBFromStateTransitionFile(sdb *storage.StateDBStorage, network string) (statedb *StateDB, err error) {
+func NewStateDBFromStateTransitionFile(sdb *storage.StorageHub, network string) (statedb *StateDB, err error) {
 	fn, err := common.GetFilePathForNetwork(network)
 	if err != nil {
 		return statedb, fmt.Errorf("failed to get file path for network %s: %w", network, err)
@@ -423,7 +423,7 @@ func IsGenesisSTF(statetransition *StateTransition) bool {
 	return false
 }
 
-func NewStateDBFromStateTransitionPost(sdb *storage.StateDBStorage, statetransition *StateTransition) (statedb *StateDB, err error) {
+func NewStateDBFromStateTransitionPost(sdb *storage.StorageHub, statetransition *StateTransition) (statedb *StateDB, err error) {
 	statedb, err = newStateDB(sdb, common.Hash{})
 	if err != nil {
 		return statedb, err
@@ -440,7 +440,7 @@ func NewStateDBFromStateTransitionPost(sdb *storage.StateDBStorage, statetransit
 	return statedb, nil
 }
 
-func NewStateDBFromStateKeyVals(sdb *storage.StateDBStorage, stateKeyVals *StateKeyVals) (statedb *StateDB, err error) {
+func NewStateDBFromStateKeyVals(sdb *storage.StorageHub, stateKeyVals *StateKeyVals) (statedb *StateDB, err error) {
 	statedb, err = newStateDB(sdb, common.Hash{})
 	if err != nil {
 		return statedb, err

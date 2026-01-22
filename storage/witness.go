@@ -234,7 +234,7 @@ func applyNonceWrites(address []byte, payload []byte, tree *UnifiedBinaryTree) e
 //   4. ... execute refine ...
 //   5. postRoot, _ := ApplyWritesToTree(preRoot, contractWrites) // Clone, apply, store under postRoot
 //   6. EnqueueWithRoots(bundle, preRoot, postRoot)
-func (store *StateDBStorage) CreateSnapshotFromRoot(parentRoot common.Hash) (common.Hash, error) {
+func (store *StorageHub) CreateSnapshotFromRoot(parentRoot common.Hash) (common.Hash, error) {
 	// Verify parent root exists
 	_, exists := store.GetTreeByRootTyped(parentRoot)
 	if !exists {
@@ -256,7 +256,7 @@ func (store *StateDBStorage) CreateSnapshotFromRoot(parentRoot common.Hash) (com
 //
 // This is the root-first replacement for ApplyWritesToActiveSnapshot.
 // The caller specifies exactly which tree to modify by its root.
-func (store *StateDBStorage) ApplyWritesToTree(root common.Hash, blob []byte) (common.Hash, error) {
+func (store *StorageHub) ApplyWritesToTree(root common.Hash, blob []byte) (common.Hash, error) {
 	if len(blob) == 0 {
 		return root, nil // No changes, return same root
 	}
@@ -267,7 +267,7 @@ func (store *StateDBStorage) ApplyWritesToTree(root common.Hash, blob []byte) (c
 		return common.Hash{}, fmt.Errorf("ApplyWritesToTree: tree not found at root %s", root.Hex())
 	}
 
-	// CRITICAL: Clone before mutation to preserve root immutability.
+	// Clone before mutation to preserve root immutability.
 	// The original tree at `root` must remain unchanged so historical roots stay valid.
 	// This enables safe resubmission - the preRoot always points to the correct pre-state.
 	snapshot := origTree.Copy()
@@ -293,64 +293,14 @@ func (store *StateDBStorage) ApplyWritesToTree(root common.Hash, blob []byte) (c
 	return newRoot, nil
 }
 
-// GetActiveTree returns the UBT tree that should be used for reads.
-// Priority: pinnedTree (Phase 2) > activeRoot (root-first) > canonical.
-// Returns interface{} to satisfy EVMJAMStorage interface.
-func (store *StateDBStorage) GetActiveTree() interface{} {
-	return store.GetActiveTreeTyped()
+// GetActiveTree returns the UBT tree for reads.
+// Priority: pinnedTree > activeRoot > canonical.
+func (store *StorageHub) GetActiveTree() interface{} {
+	return store.Session.UBT.GetActiveTree()
 }
 
-// GetActiveTreeTyped returns the typed UBT tree for reads (internal use).
-// Priority: pinnedTree (Phase 2) > activeRoot (root-first) > canonical.
-func (store *StateDBStorage) GetActiveTreeTyped() *UnifiedBinaryTree {
-	// Check pinnedTree first (set by PinToStateRoot for Phase 2 execution)
-	store.mutex.RLock()
-	if store.pinnedTree != nil {
-		tree := store.pinnedTree
-		pinnedRoot := ""
-		if store.pinnedStateRoot != nil {
-			pinnedRoot = store.pinnedStateRoot.Hex()[:16]
-		}
-		treeRootHash := tree.RootHash()
-		store.mutex.RUnlock()
-		log.Debug(log.EVM, "GetActiveTreeTyped: using pinnedTree",
-			"ptr", fmt.Sprintf("%p", store),
-			"pinnedRoot", pinnedRoot,
-			"treeRoot", fmt.Sprintf("%x", treeRootHash[:8]),
-			"isClone", store.isClone)
-		return tree
-	}
-	// Get per-instance activeRoot while still holding mutex
-	activeRoot := store.activeRoot
-	store.mutex.RUnlock()
-
-	// Check per-instance activeRoot (root-first state access)
-	// activeRoot is PER-INSTANCE - must be set on THIS storage instance
-	if activeRoot != (common.Hash{}) {
-		store.ubtState.mutex.RLock()
-		if tree, exists := store.ubtState.treeStore[activeRoot]; exists {
-			store.ubtState.mutex.RUnlock()
-			log.Debug(log.EVM, "GetActiveTreeTyped: using activeRoot tree",
-				"ptr", fmt.Sprintf("%p", store),
-				"activeRoot", activeRoot.Hex()[:16],
-				"isClone", store.isClone)
-			return tree
-		}
-		store.ubtState.mutex.RUnlock()
-	}
-
-	// Fall back to canonical tree (this is the root-first default)
-	store.ubtState.mutex.RLock()
-	tree := store.ubtState.treeStore[store.ubtState.canonicalRoot]
-	canonicalRoot := store.ubtState.canonicalRoot
-	store.ubtState.mutex.RUnlock()
-
-	log.Debug(log.EVM, "GetActiveTreeTyped: using canonical tree (no activeRoot or pinnedTree set)",
-		"ptr", fmt.Sprintf("%p", store),
-		"canonicalRoot", canonicalRoot.Hex()[:16],
-		"activeRoot", activeRoot.Hex()[:16],
-		"pinnedTree", store.pinnedTree != nil,
-		"isClone", store.isClone)
-
-	return tree
+// GetActiveTreeTyped returns the typed UBT tree for reads.
+// Priority: pinnedTree > activeRoot > canonical.
+func (store *StorageHub) GetActiveTreeTyped() *UnifiedBinaryTree {
+	return store.Session.UBT.GetActiveTreeTyped()
 }

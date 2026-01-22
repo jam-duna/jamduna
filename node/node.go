@@ -208,7 +208,7 @@ type NodeContent struct {
 }
 
 // TODO: add in serviceIDs
-func NewNodeContent(id uint16, store *storage.StateDBStorage, pvmBackend string) NodeContent {
+func NewNodeContent(id uint16, store *storage.StorageHub, pvmBackend string) NodeContent {
 	//fmt.Printf("[N%v] NewNodeContent pvmBackend: %s\n", id, pvmBackend)
 	return NodeContent{
 		id:                   id,
@@ -770,7 +770,7 @@ func createNode(id uint16, credential types.ValidatorSecret, chainspec *chainspe
 
 func PrintSpec(chainspec *chainspecs.ChainSpec) error {
 	levelDBPath := "/tmp/xxx"
-	store, err := storage.NewStateDBStorage(levelDBPath, storage.NewMockJAMDA(), telemetry.NewNoOpTelemetryClient(), 0)
+	store, err := storage.NewStorageHub(levelDBPath, storage.NewMockJAMDA(), telemetry.NewNoOpTelemetryClient(), 0)
 	if err != nil {
 		return err
 	}
@@ -896,9 +896,9 @@ func newNode(id uint16, credential types.ValidatorSecret, chainspec *chainspecs.
 	// Now create storage with pointer to node.NodeContent (not a copy)
 	levelDBPath := fmt.Sprintf("%v/leveldb/%d/", dataDir, port)
 	tempTelemetryClient := telemetry.NewNoOpTelemetryClient()
-	store, err := storage.NewStateDBStorage(levelDBPath, &node.NodeContent, tempTelemetryClient, id)
+	store, err := storage.NewStorageHub(levelDBPath, &node.NodeContent, tempTelemetryClient, id)
 	if err != nil {
-		return nil, fmt.Errorf("NewStateDBStorage[port:%d] Err %v", port, err)
+		return nil, fmt.Errorf("NewStorageHub[port:%d] Err %v", port, err)
 	}
 	node.NodeContent.store = store
 	node.extrinsic_pool.SetGuaranteeDiscardCallback(node.handleGuaranteeDiscarded)
@@ -2139,7 +2139,7 @@ func (n *NodeContent) addStateDB(_statedb *statedb.StateDB) error {
 	defer n.statedbMapMutex.Unlock()
 
 	// DEBUG: Log when a new state is being added to the node
-	log.Info(log.B, "🔄 addStateDB: adding new state",
+	log.Trace(log.B, "🔄 addStateDB: adding new state",
 		"nodeID", n.id,
 		"newStateRoot", _statedb.StateRoot.Hex()[:16],
 		"newSlot", _statedb.GetSafrole().Timeslot,
@@ -3100,7 +3100,7 @@ func (n *Node) recoverStateViaCE129(ctx context.Context, nextBlock *types.Block)
 
 	// Create a new StateDB from the recovered key-values
 	// We need to use the storage to create it
-	recoveredStateDB, err := statedb.NewStateDBFromStateKeyVals(n.store.(*storage.StateDBStorage), stateKeyVals)
+	recoveredStateDB, err := statedb.NewStateDBFromStateKeyVals(n.store.(*storage.StorageHub), stateKeyVals)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create StateDB from recovered state: %w", err)
 	}

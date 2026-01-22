@@ -13,7 +13,7 @@ type BMTProof []common.Hash
 
 // SetStates sets multiple state values in a single batch operation
 // mask indicating which states to set
-func (t *StateDBStorage) SetStates(values [16][]byte) {
+func (t *StorageHub) SetStates(values [16][]byte) {
 	// Get current states to detect changes
 	oldStates, _ := t.GetStates()
 
@@ -28,7 +28,7 @@ func (t *StateDBStorage) SetStates(values [16][]byte) {
 }
 
 // GetStates retrieves all 16 state values
-func (t *StateDBStorage) GetStates() ([16][]byte, error) {
+func (t *StorageHub) GetStates() ([16][]byte, error) {
 	var states [16][]byte
 	for i := uint8(0); i < 16; i++ {
 		stateKey := make([]byte, stateKeySize)
@@ -45,13 +45,13 @@ func (t *StateDBStorage) GetStates() ([16][]byte, error) {
 }
 
 // DeleteService (hash)
-func (t *StateDBStorage) DeleteService(s uint32) error {
+func (t *StorageHub) DeleteService(s uint32) error {
 	service_account := common.ComputeC_is(s)
 	stateKey := service_account.Bytes()
 	return t.Delete(stateKey)
 }
 
-func (t *StateDBStorage) SetService(s uint32, v []byte) error {
+func (t *StorageHub) SetService(s uint32, v []byte) error {
 	/*
 		∀(s ↦ a) ∈ δ ∶ C(255, s) ↦ a c ⌢E 8 (a b ,a g ,a m ,a l )⌢E 4 (a i )
 		i: 255
@@ -71,7 +71,7 @@ func (t *StateDBStorage) SetService(s uint32, v []byte) error {
 	return nil
 }
 
-func (t *StateDBStorage) GetService(s uint32) ([]byte, bool, error) {
+func (t *StorageHub) GetService(s uint32) ([]byte, bool, error) {
 	service_account := common.ComputeC_is(s)
 	stateKey := service_account.Bytes()
 	value, ok, err := t.Get(stateKey)
@@ -84,7 +84,7 @@ func (t *StateDBStorage) GetService(s uint32) ([]byte, bool, error) {
 }
 
 // set a_l (with timeslot if we have E_P). For GP_0.3.5(158)
-func (t *StateDBStorage) SetPreImageLookup(s uint32, blob_hash common.Hash, blob_len uint32, time_slots []uint32) error {
+func (t *StorageHub) SetPreImageLookup(s uint32, blob_hash common.Hash, blob_len uint32, time_slots []uint32) error {
 
 	al_internal_key := common.Compute_preimageLookup_internal(blob_hash, blob_len)
 	account_lookuphash := common.ComputeC_sh(s, al_internal_key) // C(s, (h,l))
@@ -111,7 +111,7 @@ func StorageBytesToTimeSlots(vByte []byte) (time_slots []uint32) {
 }
 
 // lookup a_l .. returning time slot. For GP_0.3.5(157)
-func (t *StateDBStorage) GetPreImageLookup(s uint32, blob_hash common.Hash, blob_len uint32) ([]uint32, bool, error) {
+func (t *StorageHub) GetPreImageLookup(s uint32, blob_hash common.Hash, blob_len uint32) ([]uint32, bool, error) {
 
 	al_internal_key := common.Compute_preimageLookup_internal(blob_hash, blob_len)
 	account_lookuphash := common.ComputeC_sh(s, al_internal_key) // C(s, (h,l))
@@ -139,7 +139,7 @@ func (t *StateDBStorage) GetPreImageLookup(s uint32, blob_hash common.Hash, blob
 }
 
 // Delete PreImageLookup key(hash)
-func (t *StateDBStorage) DeletePreImageLookup(s uint32, blob_hash common.Hash, blob_len uint32) error {
+func (t *StorageHub) DeletePreImageLookup(s uint32, blob_hash common.Hash, blob_len uint32) error {
 	al_internal_key := common.Compute_preimageLookup_internal(blob_hash, blob_len)
 	account_lookuphash := common.ComputeC_sh(s, al_internal_key) // C(s, (h,l))
 	stateKey := account_lookuphash.Bytes()
@@ -147,7 +147,7 @@ func (t *StateDBStorage) DeletePreImageLookup(s uint32, blob_hash common.Hash, b
 }
 
 // Insert Storage Value into the trie
-func (t *StateDBStorage) SetServiceStorage(s uint32, k []byte, storageValue []byte) error {
+func (t *StorageHub) SetServiceStorage(s uint32, k []byte, storageValue []byte) error {
 	as_internal_key := common.Compute_storageKey_internal(k)
 	account_storage_key := common.ComputeC_sh(s, as_internal_key)
 	stateKey := account_storage_key.Bytes()
@@ -155,7 +155,7 @@ func (t *StateDBStorage) SetServiceStorage(s uint32, k []byte, storageValue []by
 	return nil
 }
 
-func (t *StateDBStorage) GetServiceStorage(s uint32, k []byte) ([]byte, bool, error) {
+func (t *StorageHub) GetServiceStorage(s uint32, k []byte) ([]byte, bool, error) {
 	as_internal_key := common.Compute_storageKey_internal(k)
 	account_storage_key := common.ComputeC_sh(s, as_internal_key)
 	stateKey := account_storage_key.Bytes()
@@ -169,7 +169,7 @@ func (t *StateDBStorage) GetServiceStorage(s uint32, k []byte) ([]byte, bool, er
 }
 
 // same as above but with proof
-func (t *StateDBStorage) GetServiceStorageWithProof(s uint32, k []byte) ([]byte, [][]byte, common.Hash, bool, error) {
+func (t *StorageHub) GetServiceStorageWithProof(s uint32, k []byte) ([]byte, [][]byte, common.Hash, bool, error) {
 	as_internal_key := common.Compute_storageKey_internal(k)
 	account_storage_key := common.ComputeC_sh(s, as_internal_key)
 	stateKey := account_storage_key.Bytes()
@@ -188,7 +188,7 @@ func (t *StateDBStorage) GetServiceStorageWithProof(s uint32, k []byte) ([]byte,
 }
 
 // Delete Storage key(hash)
-func (t *StateDBStorage) DeleteServiceStorage(s uint32, k []byte) error {
+func (t *StorageHub) DeleteServiceStorage(s uint32, k []byte) error {
 	as_internal_key := common.Compute_storageKey_internal(k)
 	account_storage_key := common.ComputeC_sh(s, as_internal_key)
 	stateKey := account_storage_key.Bytes()
@@ -196,7 +196,7 @@ func (t *StateDBStorage) DeleteServiceStorage(s uint32, k []byte) error {
 }
 
 // Set PreImage Blob for GP_0.3.5(158)
-func (t *StateDBStorage) SetPreImageBlob(s uint32, blob []byte) error {
+func (t *StorageHub) SetPreImageBlob(s uint32, blob []byte) error {
 	/*
 		∀(s ↦ a) ∈ δ, (h ↦ p) ∈ a p ∶ C(s, h) ↦ p
 		(s, h) ↦ [n 0 ,h 0 ,n 1 ,h 1 ,n 2 ,h 2 ,n 3 ,h 3 ,h 4 ,h 5 ,...,h 27 ] where n = E 4 (s)
@@ -216,7 +216,7 @@ func (t *StateDBStorage) SetPreImageBlob(s uint32, blob []byte) error {
 	return nil
 }
 
-func (t *StateDBStorage) GetPreImageBlob(s uint32, blobHash common.Hash) (value []byte, ok bool, err error) {
+func (t *StorageHub) GetPreImageBlob(s uint32, blobHash common.Hash) (value []byte, ok bool, err error) {
 	ap_internal_key := common.Compute_preimageBlob_internal(blobHash)
 	account_preimage_hash := common.ComputeC_sh(s, ap_internal_key)
 	stateKey := account_preimage_hash.Bytes()
@@ -229,7 +229,7 @@ func (t *StateDBStorage) GetPreImageBlob(s uint32, blobHash common.Hash) (value 
 }
 
 // Delete PreImage Blob
-func (t *StateDBStorage) DeletePreImageBlob(s uint32, blobHash common.Hash) error {
+func (t *StorageHub) DeletePreImageBlob(s uint32, blobHash common.Hash) error {
 	ap_internal_key := common.Compute_preimageBlob_internal(blobHash)
 	account_preimage_hash := common.ComputeC_sh(s, ap_internal_key)
 	stateKey := account_preimage_hash.Bytes()
@@ -237,11 +237,11 @@ func (t *StateDBStorage) DeletePreImageBlob(s uint32, blobHash common.Hash) erro
 }
 
 // Trace traces the path to a specific key in the Merkle Tree and returns the sibling hashes along the path
-func (t *StateDBStorage) Trace(keyBytes []byte) ([][]byte, error) {
+func (t *StorageHub) Trace(keyBytes []byte) ([][]byte, error) {
 	key := normalizeKey32(keyBytes)
 
 	// Generate merkle proof for this key using trie's Trace method
-	return t.trieDB.Trace(key[:])
+	return t.Session.JAM.Trie().Trace(key[:])
 }
 
 // StorageVerify verifies the path to a specific key in the Merkle Tree

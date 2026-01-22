@@ -22,7 +22,7 @@ type Fuzzer struct {
 	fuzzerInfo     PeerInfo
 	targetInfo     PeerInfo
 	seed           []byte
-	store          *storage.StateDBStorage
+	store          *storage.StorageHub
 	internalSTFMap map[common.Hash]*statedb.StateTransition
 	pvmBackend     string
 	reportDir      string
@@ -30,7 +30,7 @@ type Fuzzer struct {
 
 // NewFuzzer creates a new fuzzer instance.
 func NewFuzzer(storageDir string, reportDir string, socketPath string, fuzzerInfo PeerInfo, pvmBackend string) (*Fuzzer, error) {
-	sdbStorage, err := storage.NewStateDBStorage(storageDir, nil, nil, 0)
+	sdbStorage, err := storage.NewStorageHub(storageDir, nil, nil, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize fuzzer's local storage: %w", err)
 	}

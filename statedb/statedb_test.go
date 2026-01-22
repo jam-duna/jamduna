@@ -25,7 +25,7 @@ func GenerateObjectID(pairIndex int, payload []byte) common.Hash {
 	return common.Blake2Hash(data)
 }
 
-func genesisBlock(t *testing.T) (storage *storage.StateDBStorage, stateRootsAtBlock []common.Hash, ObjectRefsAtBlock []map[common.Hash]types.ObjectRef) {
+func genesisBlock(t *testing.T) (storage *storage.StorageHub, stateRootsAtBlock []common.Hash, ObjectRefsAtBlock []map[common.Hash]types.ObjectRef) {
 	t.Helper()
 
 	testDir := t.TempDir()
@@ -48,7 +48,7 @@ func genesisBlock(t *testing.T) (storage *storage.StateDBStorage, stateRootsAtBl
 }
 
 func advanceBlockPartialState(t *testing.T, block int, prevStateRoot common.Hash, prevObjectRefs map[common.Hash]types.ObjectRef,
-	storage *storage.StateDBStorage, nextObjectIdx *int) (common.Hash, map[common.Hash]types.ObjectRef) {
+	storage *storage.StorageHub, nextObjectIdx *int) (common.Hash, map[common.Hash]types.ObjectRef) {
 	t.Helper()
 
 	statedb, err := NewStateDBFromStateRoot(prevStateRoot, storage)
@@ -125,7 +125,7 @@ func advanceBlockPartialState(t *testing.T, block int, prevStateRoot common.Hash
 }
 
 // verifyBlock verifies all objects for a given stateroot using both ReadServiceStorage and GetServiceStorage
-func verifyBlock(t *testing.T, block int, stateRoot common.Hash, storage *storage.StateDBStorage,
+func verifyBlock(t *testing.T, block int, stateRoot common.Hash, storage *storage.StorageHub,
 	expectedRefs map[common.Hash]types.ObjectRef) uint64 {
 	t.Helper()
 

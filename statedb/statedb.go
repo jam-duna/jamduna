@@ -47,7 +47,7 @@ type StateDB struct {
 	HeaderHash              common.Hash  `json:"headerHash"`
 	StateRoot               common.Hash  `json:"stateRoot"`
 	JamState                *JamState    `json:"Jamstate"`
-	sdb                     types.JAMStorage
+	sdb                     types.StorageSession
 	posteriorSafroleEntropy *SafroleState // used to manage entropy, validator, and winning ticket
 
 	// used in ApplyStateRecentHistory between statedbs
@@ -237,9 +237,9 @@ func (s *StateDB) ValidateAddPreimageWithUpdatedService(serviceID uint32, blob [
 	}
 	return preimageHash, nil
 }
-func newEmptyStateDB(sdb types.JAMStorage) (statedb *StateDB) {
+func newEmptyStateDB(sdb types.StorageSession) (statedb *StateDB) {
 	statedb = new(StateDB)
-	statedb.SetStorage(sdb)
+	statedb.sdb = sdb
 	statedb.logChan = make(chan storage.LogMessage, 100)
 	statedb.metashardWitnesses = make(map[common.Hash]*types.StateWitness)
 	return statedb
@@ -297,12 +297,41 @@ func (s *StateDB) GetStateRoot() common.Hash {
 	return s.StateRoot
 }
 
+// GetStorage returns the underlying storage as JAMStorage.
+// The sdb field is typed as StorageSession, but the underlying implementation
+// (*storage.StorageHub) implements the full JAMStorage interface.
+// Callers needing EVMJAMStorage should type-assert the result.
+//
+// Panics if the underlying storage doesn't implement JAMStorage.
+// In production, this is always safe since StorageHub implements JAMStorage.
+// For test mocks that only implement StorageSession, use GetStorageSession() instead.
 func (s *StateDB) GetStorage() types.JAMStorage {
-	return s.sdb
+	jam, ok := s.sdb.(types.JAMStorage)
+	if !ok {
+		panic("sdb does not implement JAMStorage - use GetStorageSession() for session-only access")
+	}
+	return jam
 }
 
-func (s *StateDB) SetStorage(sdb types.JAMStorage) {
+// TryGetStorage returns the underlying storage as JAMStorage if available.
+// Returns (storage, true) if sdb implements JAMStorage, (nil, false) otherwise.
+// Use this for safe access in code that may receive session-only mocks.
+func (s *StateDB) TryGetStorage() (types.JAMStorage, bool) {
+	jam, ok := s.sdb.(types.JAMStorage)
+	return jam, ok
+}
+
+// SetStorage sets the underlying storage.
+// Accepts StorageSession to allow both full JAMStorage and session-only implementations.
+func (s *StateDB) SetStorage(sdb types.StorageSession) {
 	s.sdb = sdb
+}
+
+// GetStorageSession returns the underlying storage as StorageSession.
+// Use this when you only need session-safe operations.
+// This is the preferred accessor for new code that doesn't need JAMStorage methods.
+func (s *StateDB) GetStorageSession() types.StorageSession {
+	return s.sdb
 }
 
 func (s *StateDB) GetAllKeyValues() []KeyVal {
@@ -489,7 +518,7 @@ func (s *StateDB) Flush() common.Hash {
 	s.StateRoot = updated_root
 
 	// DEBUG: Log state root transition
-	log.Info(log.SDB, "✅ StateDB.Flush: new state root committed",
+	log.Trace(log.SDB, "✅ StateDB.Flush: new state root committed",
 		"statedbID", s.Id,
 		"previousRoot", previousRoot.Hex()[:16],
 		"newRoot", updated_root.Hex()[:16],
@@ -588,15 +617,15 @@ func (s *StateDB) String() string {
 	return types.ToJSON(s)
 }
 
-func NewStateDB(sdb *storage.StateDBStorage, blockHash common.Hash) (statedb *StateDB, err error) {
+func NewStateDB(sdb *storage.StorageHub, blockHash common.Hash) (statedb *StateDB, err error) {
 	return newStateDB(sdb, blockHash)
 }
 
 func NewStateDBFromStateRoot(stateRoot common.Hash, sdb types.JAMStorage) (recoveredStateDB *StateDB, err error) {
-	// CRITICAL FIX: Create an ISOLATED trie view for this StateDB.
-	// This prevents race conditions when multiple operations (auditor, authoring, importing)
-	// call NewStateDBFromStateRoot concurrently - each gets its own Root pointer.
-	isolatedSdb := sdb.CloneTrieView()
+	// Create an isolated session for this StateDB.
+	// Each session has its own root pointer, preventing interference between
+	// concurrent operations (auditor, authoring, importing).
+	isolatedSdb := sdb.NewSession()
 
 	log.Debug(log.SDB, "🔎 NewStateDBFromStateRoot: attempting to recover state with isolated trie",
 		"stateRoot", stateRoot.Hex()[:16],
@@ -675,10 +704,10 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 		}
 	}
 
-	// CRITICAL FIX: Create an ISOLATED trie view for this StateDB copy.
-	// Each copy now has its own Root pointer that won't be affected by
-	// SetRoot calls from other concurrent operations.
-	isolatedSdb := s.sdb.CloneTrieView()
+	// Create an isolated session for the copy.
+	// Each session has its own root pointer, so SetRoot calls on one copy
+	// won't affect other copies.
+	isolatedSdb := s.sdb.NewSession()
 
 	newStateDB = &StateDB{
 		Id:               s.Id,
@@ -726,7 +755,7 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 
 // CopyForPhase2 creates a lightweight StateDB copy for Phase 2 witness generation.
 // Unlike full Copy(), this only isolates the per-execution state needed for BuildBundle:
-// - ubtReadLog (via CloneTrieView) - each Phase 2 needs its own read log
+// - ubtReadLog (via NewSession) - each Phase 2 needs its own read log
 // - pinnedTree/activeRoot - per-execution pinning state
 // It shares the heavy state (JamState, treeStore) to minimize CPU/memory overhead.
 // This is safe because:
@@ -734,8 +763,8 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
 // - treeStore trees are immutable (copy-on-write)
 // - Only ubtReadLog needs isolation for concurrent Phase 2 builds
 func (s *StateDB) CopyForPhase2() *StateDB {
-	// CloneTrieView creates isolated storage with its own ubtReadLog
-	isolatedSdb := s.sdb.CloneTrieView()
+	// NewSession creates isolated storage with its own ubtReadLog
+	isolatedSdb := s.sdb.NewSession()
 
 	return &StateDB{
 		Id:               s.Id,

@@ -553,7 +553,10 @@ Each Phase 2 build uses `CopyForPhase2()` to create a lightweight isolated State
 ```go
 // In executePhase2ForBlock:
 stateDB := n.GetStateDB().CopyForPhase2()  // Isolated copy
-actualStorage := stateDB.GetStorage().(types.EVMJAMStorage)
+actualStorage, ok := stateDB.GetStorage().(types.EVMJAMStorage)
+if !ok {
+    return fmt.Errorf("storage does not implement EVMJAMStorage")
+}
 actualStorage.PinToStateRoot(preStateRoot)
 bundle, workReport, err := stateDB.BuildBundle(...)  // Uses isolated ubtReadLog
 ```
@@ -579,27 +582,31 @@ JamState is only mutated during block import/accumulation, never during `BuildBu
 
 ### What Gets Isolated
 
-`CloneTrieView()` (called by `CopyForPhase2`) creates storage with:
+`NewSession()` (called by `CopyForPhase2`) creates storage with:
 
 ```go
+newSession := t.Session.JAM.CopySession()
+
 // ISOLATED per-execution:
-ubtReadLog:        make([]types.UBTRead, 0),  // Fresh empty log
-ubtReadLogEnabled: true,
-pinnedStateRoot:   clonedPinnedStateRoot,     // Own pinning state
-pinnedTree:        pinnedTree,
-activeRoot:        common.Hash{},             // Own active root
+Session: SessionContexts{
+    JAM: newSession,            // Own root + staged ops
+    UBT: t.Session.UBT.Clone(), // Own activeRoot/readLog, inherits pinned state
+},
+Root:    newSession.Root(),     // Cached from session
+Witness: NewWitnessCache(),     // Fresh witness cache
 
 // SHARED (thread-safe or immutable):
-ubtState:     t.ubtState,      // treeStore is copy-on-write, safe to share
-serviceState: t.serviceState,  // Synchronized via mutex
-db:           t.db,            // LevelDB is thread-safe
+Persist:           t.Persist,          // LevelDB wrapper
+Shared:            t.Shared,           // UBTTreeManager + ServiceStateManager
+Infra:             t.Infra,            // JAMDA + telemetry
+CheckpointManager: t.CheckpointManager, // Shared checkpoint manager
 ```
 
 ### Key Invariants
 
-1. **Each Phase 2 execution has its own `ubtReadLog`** - prevents cross-contamination
+1. **Each Phase 2 execution has its own `UBTExecContext.readLog`** - prevents cross-contamination
 2. **`treeStore` trees are immutable** - `ApplyWritesToTree` clones before mutation (copy-on-write)
-3. **Pin/unpin is per-instance** - each Phase 2 pins its own `pinnedTree`
+3. **Pin/unpin is per-session** via `UBTExecContext` - each Phase 2 pins its own `pinnedTree`
 4. **JamState is read-only during BuildBundle** - safe to share
 
 ### Pending Head Root for Cross-Batch Chaining
@@ -709,46 +716,71 @@ func (s *StateDB) Copy() (newStateDB *StateDB) {
     tmpAvailableWorkReport := make([]types.WorkReport, len(s.AvailableWorkReport))
     copy(tmpAvailableWorkReport, s.AvailableWorkReport)
 
-    tmpAncestorSet := make(map[common.Hash]uint32, len(s.AncestorSet))
-    for k, v := range s.AncestorSet {
-        tmpAncestorSet[k] = v
+    var tmpAncestorSet map[common.Hash]uint32
+    if s.AncestorSet != nil {
+        tmpAncestorSet = make(map[common.Hash]uint32, len(s.AncestorSet))
+        for k, v := range s.AncestorSet {
+            tmpAncestorSet[k] = v
+        }
     }
 
     // Isolated trie view with own Root pointer
-    isolatedSdb := s.sdb.CloneTrieView()
+    isolatedSdb := s.sdb.NewSession()
 
-    return &StateDB{
+    newStateDB := &StateDB{
+        Id:               s.Id,
         Block:            s.Block.Copy(),     // Deep copy - auditing may mutate
+        ParentHeaderHash: s.ParentHeaderHash,
+        HeaderHash:       s.HeaderHash,
+        StateRoot:        s.StateRoot,
         JamState:         s.JamState.Copy(),  // Deep copy - full state snapshot
         sdb:              isolatedSdb,        // Isolated trie view
+
+        logChan:             make(chan storage.LogMessage, 100),
+        metashardWitnesses:  make(map[common.Hash]*types.StateWitness),
         AvailableWorkReport: tmpAvailableWorkReport,
         AncestorSet:         tmpAncestorSet,
-        // ... other fields
+        Authoring:           s.Authoring,
     }
+
+    // Initialize trie state on the isolated session and align with StateRoot.
+    if err := newStateDB.InitTrieAndLoadJamState(newStateDB.StateRoot); err != nil {
+        log.Error(log.SDB, "Copy: failed to initialize trie state",
+            "stateRoot", newStateDB.StateRoot.Hex(),
+            "err", err)
+    }
+
+    // Copy instead of recalculating.
+    newStateDB.RotateGuarantors()
+    return newStateDB
 }
 ```
 
-### CloneTrieView() Trie Isolation
+### NewSession() Trie Isolation
 
-Both `Copy()` and `CopyForPhase2()` use `CloneTrieView()` for trie isolation:
+Both `Copy()` and `CopyForPhase2()` use `NewSession()` for trie isolation:
 
 ```go
-func (t *StateDBStorage) CloneTrieView() types.JAMStorage {
-    return &StateDBStorage{
-        trieDB:        t.trieDB.CloneView(),  // Isolated trie view
-        Root:          t.Root,                 // Own Root pointer
-        stagedInserts: make(map[common.Hash][]byte),  // Fresh staging
-        stagedDeletes: make(map[common.Hash]bool),
+func (t *StorageHub) NewSession() types.StorageSession {
+    newSession := t.Session.JAM.CopySession()
+    return &StorageHub{
+        Persist: t.Persist,
+        Shared:  t.Shared,
+        Infra:   t.Infra,
 
-        // SHARED (thread-safe):
-        db:           t.db,           // LevelDB - thread-safe
-        ubtState:     t.ubtState,     // Synchronized via mutex
-        serviceState: t.serviceState, // Synchronized via mutex
-
-        // Per-clone state:
-        activeRoot:        common.Hash{},
-        ubtReadLog:        make([]types.UBTRead, 0),
-        ubtReadLogEnabled: true,
+        Session: SessionContexts{
+            JAM: newSession,
+            UBT: t.Session.UBT.Clone(),
+        },
+        Witness: WitnessCache{
+            Storageshard: make(map[common.Address]evmtypes.ContractStorage),
+            Code:         make(map[common.Address][]byte),
+            UBTProofs:    make(map[common.Address]evmtypes.UBTMultiproof),
+        },
+        CheckpointManager: t.CheckpointManager,
+        Root:              newSession.Root(),
+        keys:              make(map[common.Hash]bool),
+        isSessionCopy:     true,
     }
 }
 ```
@@ -772,15 +804,15 @@ func (t *StateDBStorage) CloneTrieView() types.JAMStorage {
 - `Copy()`: Long-lived async operations that need a complete, immutable snapshot
 - `CopyForPhase2()`: Short-lived operations that only read from JamState/Block
 
-### panicIfClone: Safety Guard for Canonical State Mutations
+### panicIfSessionCopy: Safety Guard for Canonical State Mutations
 
-Cloned storage instances (`CloneTrieView`) are marked with `isClone = true`. A safety guard prevents clones from accidentally mutating shared canonical state:
+NewSession instances are marked with `isSessionCopy = true`. A safety guard prevents session copies from accidentally mutating shared canonical state:
 
 ```go
 // In storage/storage.go:
-func (s *StateDBStorage) panicIfClone(operation string) {
-    if s.isClone {
-        panic(fmt.Sprintf("operation %q modifies canonical state - not allowed on CloneTrieView", operation))
+func (s *StorageHub) panicIfSessionCopy(operation string) {
+    if s.isSessionCopy {
+        panic(fmt.Sprintf("operation %q modifies canonical state - not allowed on NewSession", operation))
     }
 }
 ```
@@ -794,7 +826,7 @@ func (s *StateDBStorage) panicIfClone(operation string) {
 
 **Why this matters:**
 
-- Phase 2 clones (`CopyForPhase2`) share `ubtState` including `canonicalRoot`
+- Phase 2 clones (`CopyForPhase2`) share `ubtManager` including `canonicalRoot`
 - If a clone accidentally called `SetCanonicalRoot()`, it would corrupt the canonical state for ALL operations
 - The panic is a **fail-fast** mechanism - better to crash immediately than silently corrupt state
 

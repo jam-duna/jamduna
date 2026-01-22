@@ -50,7 +50,7 @@ func TestLargeOverflowChaining(t *testing.T) {
 	// ========== SESSION 1: Insert and flush ==========
 	fmt.Println("\n--- SESSION 1: Insert large overflow value ---")
 
-	storage1, err := NewStateDBStorage(tmpDir, nil, nil, 0)
+	storage1, err := NewStorageHub(tmpDir, nil, nil, 0)
 	if err != nil {
 		t.Fatalf("Session 1: Failed to create storage: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestLargeOverflowChaining(t *testing.T) {
 	// ========== SESSION 2: Reopen and verify ==========
 	fmt.Println("\n--- SESSION 2: Reopen from disk ---")
 
-	storage2, err := NewStateDBStorage(tmpDir, nil, nil, 0)
+	storage2, err := NewStorageHub(tmpDir, nil, nil, 0)
 	if err != nil {
 		t.Fatalf("Session 2: Failed to reopen storage: %v", err)
 	}

@@ -4,9 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/colorfulnotion/jam/common"
 	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
-	"github.com/ethereum/go-verkle"
+	"github.com/colorfulnotion/jam/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,15 +20,13 @@ func mockBlockLoader(blocks map[uint64]*evmtypes.EvmBlockPayload) func(uint64) (
 	}
 }
 
-// Helper to create a test verkle tree with a unique value
-func createTestTree(value byte) verkle.VerkleNode {
-	tree := verkle.New()
-	key := make([]byte, 32)
-	val := make([]byte, 32)
-	key[31] = value
+// Helper to create a test UBT tree with a unique value
+func createTestTree(value byte) *UnifiedBinaryTree {
+	tree := NewUnifiedBinaryTree(Config{Profile: defaultUBTProfile})
+	key := TreeKey{Subindex: value}
+	val := [32]byte{}
 	val[31] = value
-	tree.Insert(key, val, nil)
-	tree.Commit()
+	tree.Insert(key, val)
 	return tree
 }
 
@@ -67,7 +64,7 @@ func TestCheckpointTreeManager_PinCheckpoint(t *testing.T) {
 	require.NotNil(t, retrieved)
 
 	// Verify same tree hash
-	assert.Equal(t, tree.Hash(), retrieved.Hash())
+	assert.Equal(t, tree.RootHash(), retrieved.RootHash())
 }
 
 func TestCheckpointTreeManager_AddCheckpoint(t *testing.T) {
@@ -86,11 +83,11 @@ func TestCheckpointTreeManager_AddCheckpoint(t *testing.T) {
 	// Retrieve checkpoints
 	retrieved1, err := cm.GetCheckpoint(600)
 	require.NoError(t, err)
-	assert.Equal(t, tree1.Hash(), retrieved1.Hash())
+	assert.Equal(t, tree1.RootHash(), retrieved1.RootHash())
 
 	retrieved2, err := cm.GetCheckpoint(1200)
 	require.NoError(t, err)
-	assert.Equal(t, tree2.Hash(), retrieved2.Hash())
+	assert.Equal(t, tree2.RootHash(), retrieved2.RootHash())
 }
 
 func TestCheckpointTreeManager_ShouldCreateCheckpoint(t *testing.T) {
@@ -171,7 +168,7 @@ func TestGenesisNeverEvicted(t *testing.T) {
 	// Genesis should still be accessible (pinned)
 	retrievedGenesis, err := cm.GetCheckpoint(0)
 	require.NoError(t, err)
-	assert.Equal(t, genesisTree.Hash(), retrievedGenesis.Hash())
+	assert.Equal(t, genesisTree.RootHash(), retrievedGenesis.RootHash())
 	assert.True(t, cm.IsPinned(0), "Genesis should still be pinned")
 
 	t.Log("✅ Genesis survived LRU eviction of 10 checkpoints (max cache size = 3)")
@@ -181,39 +178,38 @@ func TestGenesisNeverEvicted(t *testing.T) {
 func TestCheckpointRebuildVerification(t *testing.T) {
 	// Create genesis tree
 	genesisTree := createTestTree(0x00)
-	genesisHashBytes := genesisTree.Hash().Bytes()
+	genesisHashBytes := genesisTree.RootHash()
 	genesisRoot := common.BytesToHash(genesisHashBytes[:])
 
 	// Create block 1 state by applying single delta from genesis
-	key1 := make([]byte, 32)
-	val1 := make([]byte, 32)
-	key1[31] = 0x01
+	key1 := TreeKey{Subindex: 0x01}
+	val1 := [32]byte{}
 	val1[31] = 0x11
 
 	tree1 := genesisTree.Copy()
-	tree1.Insert(key1, val1, nil)
-	tree1.Commit()
-	hashBytes1 := tree1.Hash().Bytes()
+	tree1.Insert(key1, val1)
+	hashBytes1 := tree1.RootHash()
 	root1 := common.BytesToHash(hashBytes1[:])
 
 	// Create delta for block 1
-	delta1 := &evmtypes.VerkleStateDelta{
+	key1Bytes := key1.ToBytes()
+	delta1 := &evmtypes.UBTStateDelta{
 		NumEntries: 1,
 		Entries:    make([]byte, 64),
 	}
-	copy(delta1.Entries[0:32], key1)
-	copy(delta1.Entries[32:64], val1)
+	copy(delta1.Entries[0:32], key1Bytes[:])
+	copy(delta1.Entries[32:64], val1[:])
 
-	// Mock blocks with correct verkle roots and deltas
+	// Mock blocks with correct UBT roots and deltas
 	blocks := map[uint64]*evmtypes.EvmBlockPayload{
 		0: {
-			Number:     0,
-			VerkleRoot: genesisRoot,
+			Number:  0,
+			UBTRoot: genesisRoot,
 		},
 		1: {
-			Number:           1,
-			VerkleRoot:       root1,
-			VerkleStateDelta: delta1,
+			Number:        1,
+			UBTRoot:       root1,
+			UBTStateDelta: delta1,
 		},
 	}
 	loader := mockBlockLoader(blocks)
@@ -227,7 +223,7 @@ func TestCheckpointRebuildVerification(t *testing.T) {
 	// Test 1: Retrieve genesis (should work immediately)
 	retrievedGenesis, err := cm.GetCheckpoint(0)
 	require.NoError(t, err)
-	retrievedGenesisHashBytes := retrievedGenesis.Hash().Bytes()
+	retrievedGenesisHashBytes := retrievedGenesis.RootHash()
 	assert.Equal(t, genesisRoot, common.BytesToHash(retrievedGenesisHashBytes[:]))
 
 	t.Log("✅ Genesis checkpoint verified")
@@ -238,13 +234,14 @@ func TestCheckpointRebuildVerification(t *testing.T) {
 	require.NotNil(t, retrieved1)
 
 	// Verify rebuilt tree matches expected root
-	retrieved1HashBytes := retrieved1.Hash().Bytes()
+	retrieved1HashBytes := retrieved1.RootHash()
 	retrieved1Root := common.BytesToHash(retrieved1HashBytes[:])
 	assert.Equal(t, root1, retrieved1Root, "Rebuilt checkpoint 1 root should match expected")
 
 	// Verify the value is actually in the rebuilt tree
-	retrievedVal, err := retrieved1.Get(key1, nil)
+	retrievedVal, found, err := retrieved1.Get(&key1)
 	require.NoError(t, err)
+	require.True(t, found, "Key should be found in rebuilt tree")
 	assert.Equal(t, val1, retrievedVal, "Rebuilt tree should contain the delta change")
 
 	t.Log("✅ Checkpoint 1 rebuilt from genesis using delta replay")

@@ -351,9 +351,7 @@ func (r *Rollup) ExecutePhase1(
 		return nil, fmt.Errorf("StateDB not available")
 	}
 
-	// CRITICAL: Get the clone storage that the VM will use for state reads.
-	// activeRoot must be set on THIS storage instance, not r.storage (main storage).
-	// The VM is created with sdb (StateDB), which uses sdb.GetStorage() for reads.
+	// Get the clone storage for VM state reads.
 	sdbStorage, ok := sdb.GetStorage().(types.EVMJAMStorage)
 	if !ok {
 		return nil, fmt.Errorf("StateDB storage is not EVMJAMStorage")
@@ -377,7 +375,6 @@ func (r *Rollup) ExecutePhase1(
 	if err := sdbStorage.SetActiveRoot(activeRoot); err != nil {
 		return nil, fmt.Errorf("ExecutePhase1: failed to set activeRoot on clone storage: %w", err)
 	}
-	// CRITICAL: Always clear activeRoot on clone when exiting, regardless of success/failure
 	defer sdbStorage.ClearActiveRoot()
 
 	evmPreStateRoot := activeRoot
@@ -567,7 +564,11 @@ func (r *Rollup) BuildAndEnqueueWorkPackage(
 	blockNumber := queueRunner.PeekNextBlockNumber()
 
 	// Get storage for state management
-	evmStorage := r.GetStateDB().GetStorage().(types.EVMJAMStorage)
+	jamStorage := r.GetStateDB().GetStorage()
+	evmStorage, ok := jamStorage.(types.EVMJAMStorage)
+	if !ok {
+		return fmt.Errorf("storage does not implement EVMJAMStorage")
+	}
 
 	// === ROOT-FIRST STATE MODEL ===
 	// Capture preRoot from canonical state (or parent bundle's postRoot in the future)
@@ -1327,7 +1328,7 @@ func (r *Rollup) GetStorageAt(address common.Address, position common.Hash, bloc
 
 // ReadContractStorageValue reads EVM contract storage, checking witness cache first
 func (r *Rollup) ReadContractStorageValue(contractAddress common.Address, storageKey common.Hash) (common.Hash, error) {
-	// Read from StateDBStorage witness cache (populated during PrepareBuilderWitnesses or import)
+	// Read from StorageHub witness cache (populated during PrepareBuilderWitnesses or import)
 	value, found := r.storage.ReadStorageFromCache(contractAddress, storageKey)
 	if found {
 		return value, nil
@@ -1993,7 +1994,10 @@ func (r *Rollup) SubmitEVMGenesis(startBalance int64) error {
 	issuerAddress, _ := common.GetEVMDevAccount(0)
 
 	// Delegate to storage layer
-	evmStorage := r.storage.(types.EVMJAMStorage)
+	evmStorage, ok := r.storage.(types.EVMJAMStorage)
+	if !ok {
+		return fmt.Errorf("SubmitEVMGenesis: storage does not implement EVMJAMStorage")
+	}
 	ubtRootHash, err := evmStorage.InitializeEVMGenesis(r.serviceID, issuerAddress, startBalance)
 	if err != nil {
 		return fmt.Errorf("failed to initialize EVM genesis: %w", err)

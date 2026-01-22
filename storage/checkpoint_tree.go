@@ -25,7 +25,7 @@ type CheckpointTreeManager struct {
 	coarsePeriod uint64 // 7200 blocks (~12h at 2s/block)
 	finePeriod   uint64 // 600 blocks (~1h)
 
-	// Block loader for replay (provided by StateDBStorage)
+	// Block loader for replay (provided by StorageHub)
 	blockLoader func(uint64) (*evmtypes.EvmBlockPayload, error)
 }
 
@@ -91,7 +91,7 @@ func (cm *CheckpointTreeManager) rebuildCheckpoint(height uint64) (*UnifiedBinar
 		return nil, fmt.Errorf("no base checkpoint found for height %d (genesis must be pinned)", height)
 	}
 
-	// CRITICAL: Copy base tree before replay (prevents mutation of cached checkpoint)
+	// Copy base tree before replay to prevent mutation of cached checkpoint.
 	baseTreeCopy := baseTree.Copy()
 
 	// Verify base checkpoint root matches canonical root at baseHeight

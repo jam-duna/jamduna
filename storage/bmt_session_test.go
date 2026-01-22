@@ -34,7 +34,7 @@ func TestSessionResumption(t *testing.T) {
 		{hex2Bytes("d7f99b746f23411983df92806725af8e5cb66eba9f200737accae4a1ab7f47b9"), hex2Bytes("965ac2547cacec18429e88553142a605d649fbcd6a40a0ae5d51a8f218c8fd5c")},
 	}
 
-	storage1, err := NewStateDBStorage(tmpDir, nil, nil, 0)
+	storage1, err := NewStorageHub(tmpDir, nil, nil, 0)
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestSessionResumption(t *testing.T) {
 	// ========== SESSION 2: Resume from disk ==========
 	fmt.Println("\n--- SESSION 2: Reopen from persisted state ---")
 
-	storage2, err := NewStateDBStorage(tmpDir, nil, nil, 0)
+	storage2, err := NewStorageHub(tmpDir, nil, nil, 0)
 	if err != nil {
 		t.Fatalf("Failed to reopen storage: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestSessionResumption(t *testing.T) {
 	storage2.Close()
 	fmt.Println("Session 2 storage CLOSED")
 
-	storage3, err := NewStateDBStorage(tmpDir, nil, nil, 0)
+	storage3, err := NewStorageHub(tmpDir, nil, nil, 0)
 	if err != nil {
 		t.Fatalf("Failed to reopen storage for Session 3: %v", err)
 	}

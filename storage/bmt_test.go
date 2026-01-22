@@ -16,14 +16,14 @@ func hex2Bytes(hexStr string) []byte {
 	return bytes
 }
 
-// setupStorage creates a temporary StateDBStorage for testing
-func setupStorage() *StateDBStorage {
+// setupStorage creates a temporary StorageHub for testing
+func setupStorage() *StorageHub {
 	tmpDir, err := os.MkdirTemp("", "nomt-test-*")
 	if err != nil {
 		panic(fmt.Sprintf("failed to create temp directory: %v", err))
 	}
 
-	storage, err := NewStateDBStorage(tmpDir, nil, nil, 0)
+	storage, err := NewStorageHub(tmpDir, nil, nil, 0)
 	if err != nil {
 		panic(fmt.Sprintf("failed to create storage: %v", err))
 	}

@@ -197,7 +197,7 @@ fn state_read(&self, address: H160) -> Value {
 ```
 
 **Design Rationale**:
-- **Builder**: UBT reads logged to `StateDBStorage.ubtReadLog` (storage layer maintains authoritative log)
+- **Builder**: UBT reads logged to `StorageHub.Session.UBT` read log (storage layer maintains authoritative log)
 - **Guarantor**: All accessed state must be in witness (deterministic verification)
 - **Two-step API**: Query size first (`output_max_len=0`), then fetch data
 - **Witness ownership**: Storage package owns witness construction and tree operations
@@ -214,7 +214,7 @@ fn state_read(&self, address: H160) -> Value {
 - **Builder Mode**: Uses UBT host function `host_fetch_ubt(FETCH_BALANCE)` to read from UBT tree
   - Go reads BasicData key (suffix 0) from UBT tree
   - Extracts balance from bytes [16:31] of BasicData (16 bytes, big-endian uint128)
-  - Logs read to `StateDBStorage.ubtReadLog` for witness construction
+  - Logs read to `StorageHub.Session.UBT` read log for witness construction
 - **Guarantor Mode**: Reads from pre-populated cache (populated from UBTWitness)
   - Cache miss causes panic (witness must contain all accessed state)
 - UBT tree structure per EIP-6800: balance stored at BasicData offset 16-31
@@ -301,7 +301,7 @@ fn state_read(&self, address: H160) -> Value {
 - **Builder Mode**: Uses UBT host function `host_fetch_ubt(FETCH_NONCE)` to read from UBT tree
   - Go reads BasicData key (suffix 0) from UBT tree
   - Extracts nonce from bytes [8:15] of BasicData (8 bytes, big-endian uint64)
-  - Logs read to `StateDBStorage.ubtReadLog` for witness construction
+  - Logs read to `StorageHub.Session.UBT` read log for witness construction
 - **Guarantor Mode**: Reads from pre-populated cache (populated from UBTWitness)
   - Cache miss causes panic (witness must contain all accessed state)
 - UBT tree structure per EIP-6800: nonce stored at BasicData offset 8-15

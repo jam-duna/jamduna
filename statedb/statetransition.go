@@ -162,7 +162,7 @@ func makemap(p []types.KeyVal) map[common.Hash][]byte {
 	return kvMap
 }
 
-func ComputeStateTransition(storage *storage.StateDBStorage, stc *StateTransition, pvmBackend string) (ok bool, postStateSnapshot *StateSnapshotRaw, jamErr error, miscErr error) {
+func ComputeStateTransition(storage *storage.StorageHub, stc *StateTransition, pvmBackend string) (ok bool, postStateSnapshot *StateSnapshotRaw, jamErr error, miscErr error) {
 	preState, miscErr := NewStateDBFromStateTransition(storage, stc)
 	if miscErr != nil {
 		// Invalid pre-state
@@ -204,7 +204,7 @@ func CheckStateTransition(storage types.JAMStorage, st *StateTransition, ancesto
 	return fmt.Errorf("mismatch")
 }
 
-func Prevalidation(preState *StateDB, st *StateTransition, sdb *storage.StateDBStorage) error {
+func Prevalidation(preState *StateDB, st *StateTransition, sdb *storage.StorageHub) error {
 	if bytes.Equal(preState.StateRoot.Bytes(), st.PostState.StateRoot.Bytes()) {
 		//			return nil, fmt.Errorf("OMIT")
 	}
@@ -229,7 +229,7 @@ func Prevalidation(preState *StateDB, st *StateTransition, sdb *storage.StateDBS
 	return nil
 }
 
-func CheckStateTransitionWithOutput(sdb *storage.StateDBStorage, st *StateTransition, ancestorSet map[common.Hash]uint32, pvmBackend string, runPrevalidation bool, logDir string, writeFile ...string) (diffs map[string]DiffState, err error) {
+func CheckStateTransitionWithOutput(sdb *storage.StorageHub, st *StateTransition, ancestorSet map[common.Hash]uint32, pvmBackend string, runPrevalidation bool, logDir string, writeFile ...string) (diffs map[string]DiffState, err error) {
 	// Apply the state transition
 	t0 := time.Now()
 	preState, err := NewStateDBFromStateTransition(sdb, st)

@@ -36,7 +36,7 @@ func TestPersistenceAcrossRestart(t *testing.T) {
 		{hex2Bytes("cccc0000000000000000000000000000000000000000000000000000000000cc"), hex2Bytes("deadbeef03")},
 	}
 
-	storage1, err := NewStateDBStorage(tmpDir, nil, nil, 0)
+	storage1, err := NewStorageHub(tmpDir, nil, nil, 0)
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestPersistenceAcrossRestart(t *testing.T) {
 	// ========== PROCESS 2: Reopen from disk (CRITICAL TEST) ==========
 	fmt.Println("\n--- PROCESS 2: Reopen from disk (new process) ---")
 
-	storage2, err := NewStateDBStorage(tmpDir, nil, nil, 0)
+	storage2, err := NewStorageHub(tmpDir, nil, nil, 0)
 	if err != nil {
 		t.Fatalf("Failed to reopen storage: %v", err)
 	}

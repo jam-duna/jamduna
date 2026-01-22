@@ -265,7 +265,7 @@ func testAccumulateSTF(testname string, TestCase AccumulateTestCase, t *testing.
 	rand.Seed(time.Now().UnixNano()) // Seed the random number generator
 	db_path := fmt.Sprintf("/tmp/testReport_%d", rand.Intn(100000000))
 
-	sdb, err := storage.NewStateDBStorage(db_path, storage.NewMockJAMDA(), nil, 0)
+	sdb, err := storage.NewStorageHub(db_path, storage.NewMockJAMDA(), nil, 0)
 	if err != nil {
 		t.Errorf("Reports FAIL: failed to create state db: %v", err)
 	}
@@ -386,7 +386,7 @@ func AccumulateSTF(testname string, TestCase AccumulateTestCase) error {
 	rand.Seed(time.Now().UnixNano()) // Seed the random number generator
 	db_path := fmt.Sprintf("/tmp/testReport_%d", rand.Intn(100000000))
 
-	sdb, err := storage.NewStateDBStorage(db_path, storage.NewMockJAMDA(), nil, 0)
+	sdb, err := storage.NewStorageHub(db_path, storage.NewMockJAMDA(), nil, 0)
 	if err != nil {
 		return fmt.Errorf("Reports FAIL: failed to create state db: %v", err)
 	}
