@@ -414,6 +414,8 @@ type StorageSession interface {
 	SetStates(values [16][]byte)
 	GetStates() ([16][]byte, error)
 	GetAllKeyValues() []KeyVal
+	GetAllKeyValuesPaged(pageSize uint32) ([]KeyVal, error) // Paged iteration for large states
+	ForEachKeyValue(pageSize uint32, fn func([]KeyVal) error) error
 
 	// Service Operations - per-service account data management
 	DeleteService(s uint32) error

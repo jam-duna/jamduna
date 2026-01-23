@@ -844,9 +844,13 @@ func TestEVMMultiRoundTransfers(t *testing.T) {
 
 		// ========== PHASE 3: Wait for all transactions across multiple bundles ==========
 		// Use block-based confirmation: O(blocks) instead of O(transactions)
-		log.Info(log.Node, "⏳ PHASE 3: Waiting for transactions via block monitoring", "expectedBundles", expectedBundles)
+		// Dynamic timeout: ~10 sec per bundle (6s slot + margin), minimum 60 rounds
+		maxWaitRounds := expectedBundles * 2
+		if maxWaitRounds < 60 {
+			maxWaitRounds = 60
+		}
 		pollInterval := 6 * time.Second
-		maxWaitRounds := 60
+		log.Info(log.Node, "⏳ PHASE 3: Waiting for transactions via block monitoring", "expectedBundles", expectedBundles, "maxWaitRounds", maxWaitRounds)
 
 		// Track unique block hashes (each represents a work package/bundle)
 		bundleHashes := make(map[string]int) // blockHash -> bundle index
@@ -1062,11 +1066,14 @@ func TestEVMMultiRoundTransfers(t *testing.T) {
 
 		// ========== PHASE 5: Verify eth_getTransactionReceipt RPC ==========
 		// This ensures receipts are coming from the real path (not legacy bogus path)
-		log.Info(log.Node, "🧾 PHASE 5: Verifying eth_getTransactionReceipt RPC returns valid receipts...")
-		fmt.Println("=== RECEIPT VERIFICATION (eth_getTransactionReceipt) ===")
+		// Sample 1 transaction out of every 30 to test across all bundles
+		sampleInterval := 30
+		expectedSamples := (len(txs) + sampleInterval - 1) / sampleInterval
+		log.Info(log.Node, "🧾 PHASE 5: Verifying eth_getTransactionReceipt RPC (sampling 1 per 30 txs)...", "totalTxs", len(txs), "expectedSamples", expectedSamples)
+		fmt.Printf("=== RECEIPT VERIFICATION (eth_getTransactionReceipt) - SAMPLING 1/%d ===\n", sampleInterval)
 
-		receiptVerifyCount := min(5, len(txs)) // Verify first 5 receipts
-		for i := 0; i < receiptVerifyCount; i++ {
+		verifiedCount := 0
+		for i := 0; i < len(txs); i += sampleInterval {
 			if txs[i].receipt == nil {
 				fmt.Printf("  Receipt[%d]: SKIPPED (tx not confirmed)\n", i)
 				continue
@@ -1098,8 +1105,9 @@ func TestEVMMultiRoundTransfers(t *testing.T) {
 			if ethReceipt.BlockHash == "" || ethReceipt.BlockNumber == "" {
 				t.Errorf("Receipt missing block info for tx %d", i)
 			}
+			verifiedCount++
 		}
-		fmt.Printf("✅ Verified %d receipts via eth_getTransactionReceipt RPC\n", receiptVerifyCount)
-		log.Info(log.Node, "✅ Receipt verification complete", "verified", receiptVerifyCount)
+		fmt.Printf("✅ Verified %d receipts via eth_getTransactionReceipt RPC (sampled 1/%d across %d txs)\n", verifiedCount, sampleInterval, len(txs))
+		log.Info(log.Node, "✅ Receipt verification complete", "verified", verifiedCount, "sampleInterval", sampleInterval, "totalTxs", len(txs))
 	})
 }

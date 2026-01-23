@@ -518,67 +518,76 @@ func (vm *VM) hostNew() {
 	xContext := vm.X
 	xs, _ := xContext.GetX_s()
 
-	// put 'g' and 'm' together
-	o := vm.ReadRegister(7)
-	c, errCode := vm.ReadRAMBytes(uint32(o), 32)
-	if errCode != OK {
+	codeHashPtr := vm.ReadRegister(7) //o
+	codeHashBytes, errCode := vm.ReadRAMBytes(uint32(codeHashPtr), 32)
+	codeLen := vm.ReadRegister(8) //l
+	//check if codeLen is doesn't exceed uint32
+
+	//if c = ∇
+	//!if No⋅⋅⋅+32 ⊆ Vμ ∧ l ∈ N2^32
+	if errCode != OK || codeLen > uint64(maxUint32) {
 		vm.terminated = true
 		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
-		log.Trace(vm.logging, "hostNew: MEM VIOLATION reading code hash", "o", o, "service_index", xs.ServiceIndex)
+		log.Trace(vm.logging, "hostNew: MEM VIOLATION reading code hash", "o", codeHashPtr, "service_index", xs.ServiceIndex)
 		return
 	}
-	l := vm.ReadRegister(8)
-	g := vm.ReadRegister(9)
-	m := vm.ReadRegister(10)
-	f := vm.ReadRegister(11)
-	vm.DebugHostFunction(NEW, "l=%d, g=%d, m=%d, f=%d", l, g, m, f)
+
+	minItemGas := vm.ReadRegister(9)    //g
+	minMemoGas := vm.ReadRegister(10)   //m
+	gratisOffset := vm.ReadRegister(11) //f
+
 	// in 0.7.1 this "i" is used with the registrar to choose serviceIDs < 64K https://graypaper.fluffylabs.dev/#/1c979cb/36da0336da03?v=0.7.1
 	// *** TODO: MC to review Small serviceIDs < 64K with registrar below
-	i := vm.ReadRegister(12)
-	x_s_t := xs.ComputeThreshold()
-	privilegedService_m := vm.X.U.PrivilegedState.ManagerServiceID
-	if privilegedService_m != xs.ServiceIndex && f != 0 {
+	requestedServiceIndex := vm.ReadRegister(12) // i
+
+	vm.DebugHostFunction(NEW, "l=%d, g=%d, m=%d, f=%d", codeLen, minItemGas, minMemoGas, gratisOffset)
+
+	senderThreshold := xs.ComputeThreshold()
+	managerServiceID := vm.X.U.PrivilegedState.ManagerServiceID
+
+	if managerServiceID != xs.ServiceIndex && gratisOffset != 0 { //otherwise if f ≠ 0 ∧ xs ≠ (xe)m
 		// only ManagerServiceID can bestow gratis
 		vm.WriteRegister(7, HUH)
 		vm.SetHostResultCode(HUH)
-		log.Trace(vm.logging, "hostNew: HUH", "ManagerServiceID", privilegedService_m, "xs", xs.ServiceIndex)
+		log.Trace(vm.logging, "hostNew: HUH", "ManagerServiceID", managerServiceID, "xs", xs.ServiceIndex)
 		return
 	}
-	if xs.Balance < x_s_t {
+	if xs.Balance < senderThreshold { //otherwise if sb < (xs)t
 		vm.WriteRegister(7, CASH)
 		vm.SetHostResultCode(CASH) //balance insufficient
-		log.Trace(vm.logging, "hostNew: NEW CASH xs.Balance < x_s_t", "xs.Balance", xs.Balance, "x_s_t", x_s_t, "x_s_index", xs.ServiceIndex)
+		log.Trace(vm.logging, "hostNew: NEW CASH xs.Balance < x_s_t", "xs.Balance", xs.Balance, "x_s_t", senderThreshold, "x_s_index", xs.ServiceIndex)
 		return
 	}
 
-	x_e_r := xContext.U.PrivilegedState.RegistrarServiceID
-	_, alreadyInservice := xContext.U.ServiceAccounts[uint32(i)]
-	if x_e_r == xs.ServiceIndex && i < types.MinPubServiceIndex && alreadyInservice {
+	registrarServiceID := xContext.U.PrivilegedState.RegistrarServiceID
+	_, alreadyInService := xContext.U.ServiceAccounts[uint32(requestedServiceIndex)]
+	isRegistrar := registrarServiceID == xs.ServiceIndex
+	requestedIsSmall := requestedServiceIndex < types.MinPubServiceIndex
+	if isRegistrar && requestedIsSmall && alreadyInService { //otherwise if xs = (xe)r ∧ i < S ∧ i ∈ K((xe)d) -- three conditions
 		vm.WriteRegister(7, FULL)
 		vm.SetHostResultCode(FULL)
-		log.Trace(vm.logging, "hostNew: NEW FULL", "i", i, "RegistrarServiceID", x_e_r, "xs", xs.ServiceIndex)
+		log.Trace(vm.logging, "hostNew: NEW FULL", "i", requestedServiceIndex, "RegistrarServiceID", registrarServiceID, "xs", xs.ServiceIndex)
 		return
 	}
-	a := &types.ServiceAccount{}
+
 	var newServiceIndex uint32
+	var newAccount *types.ServiceAccount
 
 	// selected service index (registrar privilege for small indices)
-	if x_e_r == xs.ServiceIndex && i < types.MinPubServiceIndex {
-		newServiceIndex = uint32(i)
-		a = types.NewEmptyServiceAccount(
+	if isRegistrar && requestedIsSmall { //otherwise if xs = (xe)r ∧ i < S -- two conditions
+		newServiceIndex = uint32(requestedServiceIndex)
+		newAccount = types.NewEmptyServiceAccount(
 			newServiceIndex,
-			c,
-			uint64(g),
-			uint64(m),
-			uint64(AccountLookupConst+l),
-			uint64(f),
+			codeHashBytes,
+			minItemGas,
+			minMemoGas,
+			uint64(AccountLookupConst+codeLen),
+			uint64(gratisOffset),
 			vm.Timeslot,
 			xs.ServiceIndex,
 		)
-	} else { // auto-select service index
-		// xs has enough balance to fund service creation of a AND covering its own threshold
-
+	} else { // auto-select service index -- otherwise
 		const bump = uint32(42)
 		const minPubserviceIdx = uint32(types.MinPubServiceIndex) // 65536
 		const serviceIndexRangeSize = uint32(4294901504)          // 2^32 - 2^8 - S(65536)
@@ -593,38 +602,39 @@ func (vm *VM) hostNew() {
 		newServiceIndex = new_check(xi, xContext.U.ServiceAccounts)
 		// simulate a with c, g, m
 		// [Gratis] a_r:t; a_f,a_a:0; a_p:x_s
-		a = types.NewEmptyServiceAccount(
+		newAccount = types.NewEmptyServiceAccount(
 			newServiceIndex,
-			c,
-			uint64(g),
-			uint64(m),
-			uint64(AccountLookupConst+l),
-			uint64(f),
+			codeHashBytes,
+			minItemGas,
+			minMemoGas,
+			uint64(AccountLookupConst+codeLen),
+			uint64(gratisOffset),
 			vm.Timeslot,
 			xs.ServiceIndex,
 		)
 		// GP 0.7.1: x_i' = check(S + (x_i - S + 42) mod (2^32 - S - 2^8))
 		offset := (newServiceIndex - minPubserviceIdx + bump) % serviceIndexRangeSize
-		to_check := minPubserviceIdx + offset
-		xContext.NewServiceIndex = new_check(to_check, xContext.U.ServiceAccounts)
+		toCheck := minPubserviceIdx + offset
+		xContext.NewServiceIndex = new_check(toCheck, xContext.U.ServiceAccounts)
 	}
-	a.ALLOW_MUTABLE()
-	a.Balance = a.ComputeThreshold()
+
+	newAccount.ALLOW_MUTABLE()
+	newAccount.Balance = newAccount.ComputeThreshold()
 	// Guard against underflow: ensure xs has enough balance for new service's threshold
-	if a.Balance > xs.Balance || (xs.Balance-a.Balance) < x_s_t {
+	if newAccount.Balance > xs.Balance || (xs.Balance-newAccount.Balance) < senderThreshold {
 		vm.WriteRegister(7, CASH)
 		vm.SetHostResultCode(CASH)
-		log.Trace(vm.logging, "hostNew: CASH insufficient balance for new service", "xs.Balance", xs.Balance, "a.Balance", a.Balance, "x_s_t", x_s_t, "would_underflow", a.Balance > xs.Balance)
+		log.Trace(vm.logging, "hostNew: CASH insufficient balance for new service", "xs.Balance", xs.Balance, "a.Balance", newAccount.Balance, "x_s_t", senderThreshold, "would_underflow", newAccount.Balance > xs.Balance)
 		return
 	}
-	xs.DecBalance(a.Balance) // (x's)b <- (xs)b - at
-	newServiceIndex = a.ServiceIndex
-	a.WriteLookup(common.BytesToHash(c), uint32(l), []uint32{}, "memory")
+	xs.DecBalance(newAccount.Balance) // (x's)b <- (xs)b - at
+	newServiceIndex = newAccount.ServiceIndex
+	newAccount.WriteLookup(common.BytesToHash(codeHashBytes), uint32(codeLen), []uint32{}, "memory")
 
-	xContext.U.ServiceAccounts[newServiceIndex] = a // this new account is included but only is written if (a) non-exceptional (b) exceptional and checkpointed
+	xContext.U.ServiceAccounts[newServiceIndex] = newAccount // this new account is included but only is written if (a) non-exceptional (b) exceptional and checkpointed
 	vm.WriteRegister(7, uint64(newServiceIndex))
 	vm.SetHostResultCode(OK)
-	log.Trace(vm.logging, "NEW OK", "SERVICE", fmt.Sprintf("%d", newServiceIndex), "code_hash_ptr", fmt.Sprintf("%x", o), "code_hash_ptr", fmt.Sprintf("%x", c), "code_len", l, "min_item_gas", g, "min_memo_gas", m)
+	log.Trace(vm.logging, "NEW OK", "SERVICE", fmt.Sprintf("%d", newServiceIndex), "code_hash_ptr", fmt.Sprintf("%x", codeHashPtr), "code_hash", fmt.Sprintf("%x", codeHashBytes), "code_len", codeLen, "min_item_gas", minItemGas, "min_memo_gas", minMemoGas)
 }
 
 // Upgrade service
@@ -669,58 +679,61 @@ func (vm *VM) hostTransfer() {
 		return
 	}
 
-	d := vm.ReadRegister(7)
-	a := vm.ReadRegister(8)
-	g := vm.ReadRegister(9)
-	o := vm.ReadRegister(10)
-	xs, _ := vm.X.GetX_s()
-	m, errCode := vm.ReadRAMBytes(uint32(o), M)
-	log.Trace(vm.logging, "TRANSFER attempt", "d", d, "a", a, "g", g, "o", o)
+	receiverServiceIndex := vm.ReadRegister(7)
+	amount := vm.ReadRegister(8)
+	gasLimit := vm.ReadRegister(9)
+	memoPtr := vm.ReadRegister(10)
+
+	sender, _ := vm.X.GetX_s()
+
+	memoBytes, errCode := vm.ReadRAMBytes(uint32(memoPtr), M)
+	log.Trace(vm.logging, "TRANSFER attempt", "d", receiverServiceIndex, "a", amount, "g", gasLimit, "o", memoPtr)
 	if errCode != OK {
 		vm.terminated = true
 		vm.ResultCode = types.WORKDIGEST_PANIC
 		vm.MachineState = PANIC
-		log.Trace(vm.logging, "TRANSFER PANIC", "d", d)
+		log.Trace(vm.logging, "TRANSFER PANIC", "d", receiverServiceIndex)
 		return
 	}
-	receiver, _ := vm.getXUDS(d)
+
+	receiver, _ := vm.getXUDS(receiverServiceIndex)
 	if receiver == nil {
 		vm.WriteRegister(7, WHO)
 		vm.SetHostResultCode(WHO)
-		log.Trace(vm.logging, "TRANSFER WHO", "d", d)
+		log.Trace(vm.logging, "TRANSFER WHO", "d", receiverServiceIndex)
 		return
 	}
-	log.Trace(vm.logging, "TRANSFER receiver", "g", g, "receiver.GasLimitM", receiver.GasLimitM, "receiver.ServiceIndex", receiver.ServiceIndex)
-	if g < receiver.GasLimitM {
+	log.Trace(vm.logging, "TRANSFER receiver", "g", gasLimit, "receiver.GasLimitM", receiver.GasLimitM, "receiver.ServiceIndex", receiver.ServiceIndex)
+	if gasLimit < receiver.GasLimitM {
 		vm.WriteRegister(7, LOW)
 		vm.SetHostResultCode(LOW)
-		log.Trace(vm.logging, "TRANSFER LOW", "g", g, "GasLimitM", receiver.GasLimitM)
+		log.Trace(vm.logging, "TRANSFER LOW", "g", gasLimit, "GasLimitM", receiver.GasLimitM)
 		return
 	}
 
-	// against underflow: if a > xs.Balance, the subtraction would underflow
-	threshold := xs.ComputeThreshold()
-	if a > xs.Balance || (xs.Balance-a) < threshold {
+	// against underflow: if amount > sender.Balance, the subtraction would underflow
+	threshold := sender.ComputeThreshold()
+	if amount > sender.Balance || (sender.Balance-amount) < threshold {
 		vm.WriteRegister(7, CASH)
 		vm.SetHostResultCode(CASH)
-		log.Trace(vm.logging, "TRANSFER CASH", "amount", a, "xs.Balance", xs.Balance, "threshold", threshold, "would_underflow", a > xs.Balance)
+		log.Trace(vm.logging, "TRANSFER CASH", "amount", amount, "xs.Balance", sender.Balance, "threshold", threshold, "would_underflow", amount > sender.Balance)
 		return
 	}
+
 	var memo [M]byte
-	copy(memo[:], m)
+	copy(memo[:], memoBytes)
 	t := types.DeferredTransfer{
-		Amount:        a,
-		GasLimit:      g,
+		Amount:        amount,
+		GasLimit:      gasLimit,
 		SenderIndex:   vm.X.ServiceIndex,
 		Memo:          memo,
-		ReceiverIndex: uint32(d),
+		ReceiverIndex: uint32(receiverServiceIndex),
 	} // CHECK
-	xs.DecBalance(a)
-	receiver.ALLOW_MUTABLE() // make sure all service accounts can be written
+	sender.DecBalance(amount)
+	receiver.ALLOW_MUTABLE() // make sure all service accounts can be written -- THIS MIGHT BE A PROBLEM LATER?
 
-	copy(t.Memo[:], m[:])
 	vm.X.Transfers = append(vm.X.Transfers, t)
-	log.Trace(vm.logging, "TRANSFER OK", "g", g, "sender", fmt.Sprintf("%d", t.SenderIndex), "receiver", fmt.Sprintf("%d", d), "amount", fmt.Sprintf("%d", a), "gaslimit", g, "x_s_bal", xs.Balance, "DeferredTransfer", t.String())
+	log.Trace(vm.logging, "TRANSFER OK", "g", gasLimit, "sender", fmt.Sprintf("%d", t.SenderIndex), "receiver", fmt.Sprintf("%d", receiverServiceIndex), "amount", fmt.Sprintf("%d", amount), "gaslimit", gasLimit, "x_s_bal", sender.Balance, "DeferredTransfer", t.String())
 	vm.WriteRegister(7, OK)
 	vm.SetHostResultCode(OK)
 }
@@ -1320,7 +1333,7 @@ func (vm *VM) hostLookup() {
 		vm.Panic(err_k)
 		return
 	}
-	vm.DebugHostFunction(LOOKUP, "s=%d, h=0x%x, R: 0x%x, o=0x%x, f=%d, l=%d", a.ServiceIndex, common.BytesToHash(k_bytes), uint32(h), o, f, l)
+	vm.DebugHostFunction(LOOKUP, "s=%d, h=%v, R: 0x%x, o=0x%x, f=%d, l=%d", a.ServiceIndex, common.BytesToHash(k_bytes), uint32(h), o, f, l)
 
 	var account_blobhash common.Hash
 
@@ -1340,7 +1353,7 @@ func (vm *VM) hostLookup() {
 		return
 	}
 	if !ok {
-		vm.DebugHostFunction(LOOKUP, "PREIMAGE LOOKUP NONE s=%d, h=0x%x, R: 0x%x, W:o=0x%x, f=%d, l=%d", a.ServiceIndex, account_blobhash, uint32(h), o, f, l)
+		vm.DebugHostFunction(LOOKUP, "PREIMAGE LOOKUP NONE s=%d, h=%v, R: 0x%x, W:o=0x%x, f=%d, l=%d", a.ServiceIndex, account_blobhash, uint32(h), o, f, l)
 		vm.WriteRegister(7, NONE)
 		log.Trace(vm.logging, "LOOKUP NONE", "s", fmt.Sprintf("%d", a.ServiceIndex), "h", account_blobhash, "preimage_source", preimage_source)
 		vm.SetHostResultCode(NONE)
@@ -1586,63 +1599,85 @@ func (vm *VM) hostWrite() {
 // Solicit preimage a_l(h,z)
 func (vm *VM) hostSolicit() {
 	if vm.Mode != ModeAccumulate {
+		vm.DebugHostFunction(SOLICIT, "RESULT=WHAT (wrong mode) mode=%s", vm.Mode)
 		vm.WriteRegister(7, WHAT)
 		vm.SetHostResultCode(WHAT)
 		return
 	}
 
 	xs, _ := vm.X.GetX_s()
-	// Got l of X_s by setting s = 1, z = z(from RAM)
 	o := vm.ReadRegister(7)
-	z := vm.ReadRegister(8)                         // z: blob_len
-	hBytes, err_h := vm.ReadRAMBytes(uint32(o), 32) // h: blobHash
-	if err_h != OK {
-		log.Trace(vm.logging, "SOLICIT RAM READ ERROR", "err", err_h, "o", o, "z", z)
-		vm.Panic(err_h)
-		return
-	}
-	account_lookuphash := common.BytesToHash(hBytes)
+	z := vm.ReadRegister(8) // z: blob_len
 
-	// Calculate threshold with overflow protection using ComputeThresholdDelta
-	// SOLICIT adds 2 items (lookup + preimage) and z bytes
-	threshold := xs.ComputeThresholdDelta(2, int64(z))
-	if threshold == ^uint64(0) {
-		// Overflow occurred in threshold calculation
-		vm.WriteRegister(7, FULL)
-		vm.SetHostResultCode(FULL)
+	hBytes, errCode := vm.ReadRAMBytes(uint32(o), 32) // h: blobHash
+	if errCode != OK {                                // if the RAM read fails, panic
+		log.Trace(vm.logging, "SOLICIT RAM READ ERROR", "err", errCode, "o", o, "z", z)
+		vm.DebugHostFunction(SOLICIT, "RESULT=PANIC err=%d o=0x%x z=%d", errCode, o, z)
+		vm.Panic(errCode)
 		return
 	}
-	if xs.Balance < threshold {
-		vm.WriteRegister(7, FULL)
-		vm.SetHostResultCode(FULL)
-		log.Trace(vm.logging, "SOLICIT FULL threshold reached", "h", account_lookuphash, "z", z, "threshold", threshold, "xs.Balance", xs.Balance)
-		return
+
+	accountLookupHash := common.BytesToHash(hBytes)
+	blobLen := uint32(z)
+
+	vm.DebugHostFunction(SOLICIT, "SOLICIT h=%v, z=%d", accountLookupHash, z)
+
+	// Helper to check if we have capacity to add a new lookup + preimage
+	ensureCapacity := func() bool {
+		// SOLICIT adds 2 items (lookup + preimage) and z bytes.
+		threshold := xs.ComputeThresholdDelta(2, int64(z))
+		if threshold == ^uint64(0) {
+			vm.DebugHostFunction(SOLICIT, "RESULT=FULL (threshold overflow) h=%v z=%d", accountLookupHash, z)
+			vm.WriteRegister(7, FULL)
+			vm.SetHostResultCode(FULL)
+			return false
+		}
+		if xs.Balance < threshold {
+			vm.DebugHostFunction(SOLICIT, "RESULT=FULL (threshold) h=%v z=%d threshold=%d balance=%d", accountLookupHash, z, threshold, xs.Balance)
+			vm.WriteRegister(7, FULL)
+			vm.SetHostResultCode(FULL)
+			log.Trace(vm.logging, "SOLICIT FULL threshold reached", "h", accountLookupHash, "z", z, "threshold", threshold, "xs.Balance", xs.Balance)
+			return false
+		}
+		return true
 	}
-	ok, X_s_l, lookup_source := xs.ReadLookup(account_lookuphash, uint32(z), vm.hostenv)
-	if !ok {
-		// when preimagehash is not found, put it into solicit request - so we can ask other DAs
-		xs.WriteLookup(account_lookuphash, uint32(z), []uint32{}, lookup_source)
+
+	lookupOk, lookupTimeslots, lookupSource := xs.ReadLookup(accountLookupHash, blobLen, vm.hostenv)
+
+	// Not found: create empty lookup so we can solicit from DAs.
+	if !lookupOk {
+		if !ensureCapacity() {
+			return
+		}
+		xs.WriteLookup(accountLookupHash, blobLen, []uint32{}, lookupSource)
 		xs.AdjustNumStorageItems(2)
 		xs.AdjustStorageSize(int64(AccountLookupConst + uint64(z)))
+		vm.DebugHostFunction(SOLICIT, "RESULT=OK (created empty lookup) h=%v z=%d source=%s", accountLookupHash, z, lookupSource)
 		vm.WriteRegister(7, OK)
 		vm.SetHostResultCode(OK)
 		return
 	}
 
-	if len(X_s_l) == 2 { // [x, y] => [x, y, t]
-		xs.WriteLookup(account_lookuphash, uint32(z), append(X_s_l, []uint32{vm.Timeslot}...), lookup_source)
-		al_internal_key := common.Compute_preimageLookup_internal(account_lookuphash, uint32(z))
-		account_storage_key := fmt.Sprintf("0x%x", common.ComputeC_sh(xs.ServiceIndex, al_internal_key).Bytes()[:31])
-		log.Trace(vm.logging, "SOLICIT OK 2", "service", xs.ServiceIndex, "h", account_lookuphash, "z", z, "newvalue", append(X_s_l, []uint32{vm.Timeslot}...), "account_storage_key", account_storage_key)
+	// [x, y] => [x, y, t]
+	if len(lookupTimeslots) == 2 {
+		if !ensureCapacity() {
+			return
+		}
+		newValue := append(lookupTimeslots, vm.Timeslot)
+		xs.WriteLookup(accountLookupHash, blobLen, newValue, lookupSource)
+		alInternalKey := common.Compute_preimageLookup_internal(accountLookupHash, blobLen)
+		accountStorageKey := fmt.Sprintf("0x%x", common.ComputeC_sh(xs.ServiceIndex, alInternalKey).Bytes()[:31])
+		vm.DebugHostFunction(SOLICIT, "SOLICIT OK updating existing lookup to add timeslot, h=0x%x, z=%d, newvalue=%v, account_storage_key=%s",
+			accountLookupHash, z, newValue, accountStorageKey)
+		vm.DebugHostFunction(SOLICIT, "RESULT=OK (extended lookup) h=%v z=%d source=%s", accountLookupHash, z, lookupSource)
 		vm.WriteRegister(7, OK)
 		vm.SetHostResultCode(OK)
 		return
-	} else {
-		vm.WriteRegister(7, HUH)
-		vm.SetHostResultCode(HUH)
-		//log.Trace(vm.logging, "SOLICIT HUH", "h", account_lookuphash, "z", z, "len(X_s_l)", len(X_s_l))
-		return
 	}
+	// if the above cases are not met, we are in an unexpected state --> return HUH
+	vm.DebugHostFunction(SOLICIT, "RESULT=HUH (unexpected lookup state) h=%v z=%d len(X_s_l)=%d source=%s", accountLookupHash, z, len(lookupTimeslots), lookupSource)
+	vm.WriteRegister(7, HUH)
+	vm.SetHostResultCode(HUH)
 }
 
 // Forget preimage a_l(h,z)

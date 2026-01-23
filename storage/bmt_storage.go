@@ -188,26 +188,150 @@ func (t *StorageHub) GetStateByRange(startKey []byte, endKey []byte, maximumSize
 	return t.Session.JAM.Trie().GetStateByRange(startKey, endKey, maximumSize)
 }
 
-// GetAllKeyValues retrieves key-value pairs tracked in the in-memory keys map.
+// GetAllKeyValues retrieves all key-value pairs from the trie.
+// This iterates the entire trie rather than relying on the keys map,
+// ensuring we get all keys even after Copy() which creates a new session with empty keys map.
 func (t *StorageHub) GetAllKeyValues() []types.KeyVal {
-	t.mu.RLock()
-	keys := make([]common.Hash, 0, len(t.keys))
-	for key := range t.keys {
-		keys = append(keys, key)
+	// Use GetStateByRange with full range (0x00...00 to 0xff...ff) to get all keys
+	startKey := make([]byte, 31)
+	endKey := make([]byte, 31)
+	for i := range endKey {
+		endKey[i] = 0xff
 	}
-	t.mu.RUnlock()
 
-	result := make([]types.KeyVal, 0, len(keys))
-	for _, key := range keys {
-		value, ok, err := t.Get(key[:])
-		if err == nil && ok && value != nil {
-			var kv types.KeyVal
-			copy(kv.Key[:], key[:31])
-			kv.Value = value
-			result = append(result, kv)
+	// Use maximum size to get all keys (0xffffffff = 4,294,967,295)
+	stateKVs, _, err := t.GetStateByRange(startKey, endKey, 0xffffffff)
+	if err != nil {
+		// Fall back to empty result on error
+		return []types.KeyVal{}
+	}
+
+	// Convert StateKeyValue to KeyVal format
+	result := make([]types.KeyVal, 0, len(stateKVs))
+	for _, skv := range stateKVs {
+		var kv types.KeyVal
+		copy(kv.Key[:], skv.Key[:])
+		kv.Value = skv.Value
+		result = append(result, kv)
+	}
+
+	return result
+}
+
+// GetAllKeyValuesPaged collects all key/value pairs using paged iteration.
+// pageSize of 0 defaults to 1024 entries per page.
+func (t *StorageHub) GetAllKeyValuesPaged(pageSize uint32) ([]types.KeyVal, error) {
+	iter := t.GetStatePageIterator(pageSize)
+	var all []types.KeyVal
+	for {
+		page, ok, err := iter.Next()
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			break
+		}
+		all = append(all, page...)
+	}
+	return all, nil
+}
+
+// StatePageIterator streams key/value pairs from the trie in ascending order.
+type StatePageIterator struct {
+	hub      *StorageHub
+	pageSize uint32
+	nextKey  []byte
+	done     bool
+}
+
+// GetStatePageIterator returns an iterator over trie key/values.
+// pageSize of 0 defaults to 1024.
+func (t *StorageHub) GetStatePageIterator(pageSize uint32) *StatePageIterator {
+	if pageSize == 0 {
+		pageSize = 1024
+	}
+	startKey := make([]byte, 31) // 0x00...00
+	return &StatePageIterator{
+		hub:      t,
+		pageSize: pageSize,
+		nextKey:  startKey,
+	}
+}
+
+// Next returns the next page of key/values. ok=false means iteration is done.
+func (it *StatePageIterator) Next() ([]types.KeyVal, bool, error) {
+	if it == nil || it.done {
+		return nil, false, nil
+	}
+
+	endKey := make([]byte, 31)
+	for i := range endKey {
+		endKey[i] = 0xff
+	}
+
+	stateKVs, _, err := it.hub.GetStateByRange(it.nextKey, endKey, it.pageSize)
+	if err != nil {
+		it.done = true
+		return nil, false, err
+	}
+	if len(stateKVs) == 0 {
+		it.done = true
+		return nil, false, nil
+	}
+
+	page := make([]types.KeyVal, 0, len(stateKVs))
+	for _, skv := range stateKVs {
+		var kv types.KeyVal
+		copy(kv.Key[:], skv.Key[:])
+		kv.Value = skv.Value
+		page = append(page, kv)
+	}
+
+	lastKey := stateKVs[len(stateKVs)-1].Key
+	if next, ok := incrementKey(lastKey[:]); ok {
+		it.nextKey = next
+	} else {
+		it.done = true
+	}
+	return page, true, nil
+}
+
+// incrementKey returns the next lexicographic 31-byte key.
+// Returns ok=false if the key overflows (i.e., was all 0xff).
+func incrementKey(key []byte) ([]byte, bool) {
+	if len(key) != 31 {
+		return nil, false
+	}
+	next := make([]byte, 31)
+	copy(next, key)
+	for i := len(next) - 1; i >= 0; i-- {
+		if next[i] != 0xff {
+			next[i]++
+			for j := i + 1; j < len(next); j++ {
+				next[j] = 0x00
+			}
+			return next, true
 		}
 	}
-	return result
+	return nil, false
+}
+
+// ForEachKeyValue streams key/value pairs without accumulating them in memory.
+// pageSize of 0 defaults to 1024 entries per page.
+func (t *StorageHub) ForEachKeyValue(pageSize uint32, fn func([]types.KeyVal) error) error {
+	iter := t.GetStatePageIterator(pageSize)
+	for {
+		page, ok, err := iter.Next()
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+		if err := fn(page); err != nil {
+			return err
+		}
+	}
 }
 
 func (s *StorageHub) GetKeyValues(keys []common.Hash) []types.KeyVal {

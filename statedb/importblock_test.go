@@ -496,15 +496,7 @@ func TestTaintSingleFuzzTrace(t *testing.T) {
 		t.Fatalf("failed to get fuzz reports path: %v", err)
 	}
 
-	// fileMap["1763489798"] = "fuzz-reports/0.7.1/traces/1763489798//00000950.bin"
-	fileMap["1766243147"] = "fuzz-reports/0.7.2/traces/1766243147/00000057.bin"
-	fileMap["1766243315_2078_00000118"] = "fuzz-reports/0.7.2/traces/1766243315_2078/00000118.bin"
-	fileMap["1766243315_2078_00000121"] = "fuzz-reports/0.7.2/traces/1766243315_2078/00000121.bin"
-	fileMap["1766243493_2882"] = "fuzz-reports/0.7.2/traces/1766243493_2882/00000030.bin"
-	fileMap["1766243861_8319_00000115"] = "fuzz-reports/0.7.2/traces/1766243861_8319/00000115.bin"
-	fileMap["1766243861_8319_00000119"] = "fuzz-reports/0.7.2/traces/1766243861_8319/00000119.bin"
-	// fileMap["1766244122_3401"] = "fuzz-reports/0.7.2/traces/1766244122_3401/00000891.bin" fixed by shawn
-	fileMap["1766255635_2557"] = "fuzz-reports/0.7.2/traces/1766255635_2557/00000153.bin"
+	fileMap["1768816138"] = "fuzz-reports/0.7.2/traces/1768816138/00000310.bin"
 	interpreter.PvmLogging = false
 	//	DebugHostFunctions = true
 	log.InitLogger("debug")
@@ -512,7 +504,7 @@ func TestTaintSingleFuzzTrace(t *testing.T) {
 	// log.EnableModule("pvm_validator")
 	log.EnableModule(log.SDB)
 
-	tc := []string{"1766255635_2557"}
+	tc := []string{"1768816138"}
 
 	interpreter.PvmLogging = false
 	for _, team := range tc {
@@ -709,11 +701,7 @@ func TestFuzzTraceSequential(t *testing.T) {
 	} else {
 		// Test specific cases that failed before the SetRoot fix
 		testCases := []string{
-			"1768066437_2547",
-			"1767896003_7458",
-			"1766565819_6597",
-			"1766243861_8319",
-			"1767871405_1947",
+			"1768816138", // Conformance test failure from w3f/jam-conformance JamZig_m1
 		}
 
 		for _, id := range testCases {
@@ -785,6 +773,7 @@ func runSequentialFuzzTrace(t *testing.T, sourcePath, targetVersion, testCaseID 
 
 	// Process each step sequentially (simulates fuzzer's ImportBlock messages)
 	for stepNum, stepFile := range stepFiles {
+		t.Logf("Processing step file: %s", stepFile)
 		stepContent, err := os.ReadFile(stepFile)
 		if err != nil {
 			t.Fatalf("failed to read step file %s: %v", stepFile, err)

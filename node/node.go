@@ -5036,15 +5036,33 @@ func BuildStateTransitionStruct(oldStateDB *statedb.StateDB, newBlock *types.Blo
 }
 
 func buildStateTransitionStruct(oldStateDB *statedb.StateDB, newBlock *types.Block, newStateDB *statedb.StateDB) *statedb.StateTransition {
+	// Stream state to avoid materializing full slices during debug state serialization.
+	preKeyVals := make([]statedb.KeyVal, 0)
+	if err := oldStateDB.ForEachKeyValue(0, func(page []statedb.KeyVal) error {
+		preKeyVals = append(preKeyVals, page...)
+		return nil
+	}); err != nil {
+		log.Error(log.Node, "buildStateTransitionStruct: failed to get pre-state keys", "err", err)
+		preKeyVals = []statedb.KeyVal{} // fallback to empty (debug snapshot will be incomplete but won't crash)
+	}
+
+	postKeyVals := make([]statedb.KeyVal, 0)
+	if err := newStateDB.ForEachKeyValue(0, func(page []statedb.KeyVal) error {
+		postKeyVals = append(postKeyVals, page...)
+		return nil
+	}); err != nil {
+		log.Error(log.Node, "buildStateTransitionStruct: failed to get post-state keys", "err", err)
+		postKeyVals = []statedb.KeyVal{} // fallback to empty
+	}
 
 	st := statedb.StateTransition{
 		PreState: statedb.StateSnapshotRaw{
-			KeyVals:   oldStateDB.GetAllKeyValues(),
+			KeyVals:   preKeyVals,
 			StateRoot: oldStateDB.StateRoot,
 		},
 		Block: *newBlock,
 		PostState: statedb.StateSnapshotRaw{
-			KeyVals:   newStateDB.GetAllKeyValues(),
+			KeyVals:   postKeyVals,
 			StateRoot: newStateDB.StateRoot,
 		},
 	}

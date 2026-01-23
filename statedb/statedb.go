@@ -338,6 +338,15 @@ func (s *StateDB) GetAllKeyValues() []KeyVal {
 	return s.sdb.GetAllKeyValues()
 }
 
+func (s *StateDB) GetAllKeyValuesPaged(pageSize uint32) ([]KeyVal, error) {
+	return s.sdb.GetAllKeyValuesPaged(pageSize)
+}
+
+// ForEachKeyValue streams key/values without accumulating them.
+func (s *StateDB) ForEachKeyValue(pageSize uint32, fn func([]KeyVal) error) error {
+	return s.sdb.ForEachKeyValue(pageSize, fn)
+}
+
 func (s *StateDB) GetServiceStorageWithProof(serviceID uint32, key []byte) ([]byte, [][]byte, common.Hash, bool, error) {
 	return s.sdb.GetServiceStorageWithProof(serviceID, key)
 }
@@ -775,11 +784,11 @@ func (s *StateDB) CopyForPhase2() *StateDB {
 		JamState:         s.JamState,         // SHARED - read-only during BuildBundle
 		sdb:              isolatedSdb,        // ISOLATED - has own ubtReadLog
 
-		logChan:             s.logChan,            // Can share
+		logChan:             s.logChan,                                 // Can share
 		metashardWitnesses:  make(map[common.Hash]*types.StateWitness), // Per-execution
-		AvailableWorkReport: s.AvailableWorkReport, // Read-only during Phase 2
-		AncestorSet:         s.AncestorSet,         // Read-only during Phase 2
-		Authoring:           s.Authoring,           // Read-only
+		AvailableWorkReport: s.AvailableWorkReport,                     // Read-only during Phase 2
+		AncestorSet:         s.AncestorSet,                             // Read-only during Phase 2
+		Authoring:           s.Authoring,                               // Read-only
 	}
 	// No InitTrieAndLoadJamState needed - we share JamState and trie is accessed via isolatedSdb
 }

@@ -259,7 +259,7 @@ run_evm_multi:
 	@echo "Running EVM Multi-Round Transfer Test..."
 	@echo "Ensure validators and EVM builder are running first"
 	@mkdir -p logs
-	go test -v -count=1 -run TestEVMMultiRoundTransfers ./builder/evm/rpc/ 2>&1 | tee logs/evm-multi-test.log
+	go test -v -count=1 -timeout 30m -run TestEVMMultiRoundTransfers ./builder/evm/rpc/ 2>&1 | tee logs/evm-multi-test.log
 
 run_evm_single:
 	@echo "Running EVM Single Transfer Test..."
