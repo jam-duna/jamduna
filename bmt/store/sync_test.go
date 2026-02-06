@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/colorfulnotion/jam/bmt/core"
+	"github.com/jam-duna/jamduna/bmt/core"
 )
 
 func TestSyncTwoPhase(t *testing.T) {

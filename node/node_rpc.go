@@ -14,10 +14,10 @@ import (
 
 	_ "net/http/pprof"
 
-	"github.com/colorfulnotion/jam/common"
-	log "github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/statedb"
-	types "github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/common"
+	log "github.com/jam-duna/jamduna/log"
+	"github.com/jam-duna/jamduna/statedb"
+	types "github.com/jam-duna/jamduna/types"
 )
 
 // Jam is an RPC handler for a specific JAM service/rollup

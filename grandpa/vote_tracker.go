@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/types"
 )
 
 // vote tracker is used to track the votes of the grandpa protocol

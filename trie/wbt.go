@@ -7,8 +7,8 @@ import (
 	"math"
 	"strings"
 
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/types"
 )
 
 // WBTNode is a node in the well-balanced tree.

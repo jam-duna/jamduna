@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 /* Availability Specifier

@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/ed25519"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/ed25519"
 )
 
 type Judgement struct {

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/colorfulnotion/jam/bmt/beatree/allocator"
-	"github.com/colorfulnotion/jam/bmt/beatree/leaf"
+	"github.com/jam-duna/jamduna/bmt/beatree/allocator"
+	"github.com/jam-duna/jamduna/bmt/beatree/leaf"
 )
 
 // TestStore is a simple in-memory page store for testing.

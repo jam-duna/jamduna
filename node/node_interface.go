@@ -1,7 +1,7 @@
 package node
 
 import (
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/types"
 )
 
 // JNode is an alias for types.JNode for backward compatibility

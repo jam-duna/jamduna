@@ -7,9 +7,9 @@ import (
 	"sync"
 	"testing"
 
-	bls "github.com/colorfulnotion/jam/bls"
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/types"
+	bls "github.com/jam-duna/jamduna/bls"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/types"
 )
 
 // fibStaticBuffer is the exact static buffer from services/fib/src/main.rs (4104 bytes)

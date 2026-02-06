@@ -1,6 +1,6 @@
 package bmt
 
-import "github.com/colorfulnotion/jam/bmt/beatree"
+import "github.com/jam-duna/jamduna/bmt/beatree"
 
 // Session represents a read-only snapshot of the database.
 // It provides snapshot isolation - all reads see the state at session creation time.

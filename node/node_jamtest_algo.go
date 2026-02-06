@@ -8,10 +8,10 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/log"
+	"github.com/jam-duna/jamduna/statedb"
+	"github.com/jam-duna/jamduna/types"
 )
 
 func algo(n1 JNode, testServices map[string]*types.TestService, targetN int) {

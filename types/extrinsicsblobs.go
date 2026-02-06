@@ -4,7 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 type ExtrinsicsBlobs [][]byte

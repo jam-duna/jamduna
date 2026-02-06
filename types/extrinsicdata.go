@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 // T.P.G.A.D

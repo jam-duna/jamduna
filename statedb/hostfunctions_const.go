@@ -1,6 +1,6 @@
 package statedb
 
-import "github.com/colorfulnotion/jam/pvm/pvmtypes"
+import "github.com/jam-duna/jamduna/pvm/pvmtypes"
 
 const (
 	GAS               = pvmtypes.GAS

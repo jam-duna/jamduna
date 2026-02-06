@@ -3,7 +3,7 @@ package types
 import (
 	"context"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 // JNode interface defines the methods that a JAM node must implement

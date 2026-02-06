@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 // TestVector represents a test case in the JSON file

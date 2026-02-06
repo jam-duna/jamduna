@@ -14,12 +14,12 @@ import (
 	"os"
 	"sort"
 
-	bandersnatch "github.com/colorfulnotion/jam/bandersnatch"
-	"github.com/colorfulnotion/jam/common"
-	log "github.com/colorfulnotion/jam/log"
-	storage "github.com/colorfulnotion/jam/storage"
-	telemetry "github.com/colorfulnotion/jam/telemetry"
-	"github.com/colorfulnotion/jam/types"
+	bandersnatch "github.com/jam-duna/jamduna/bandersnatch"
+	"github.com/jam-duna/jamduna/common"
+	log "github.com/jam-duna/jamduna/log"
+	storage "github.com/jam-duna/jamduna/storage"
+	telemetry "github.com/jam-duna/jamduna/telemetry"
+	"github.com/jam-duna/jamduna/types"
 )
 
 // StateProvider interface allows external components to access StateDB from a node

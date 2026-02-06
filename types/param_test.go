@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 func TestParam(t *testing.T) {

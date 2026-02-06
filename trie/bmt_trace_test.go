@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 // SnapshotKeyVal represents a key-value pair in the snapshot (matches statedb.KeyVal structure)

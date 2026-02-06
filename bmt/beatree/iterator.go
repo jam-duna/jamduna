@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/colorfulnotion/jam/bmt/beatree/allocator"
+	"github.com/jam-duna/jamduna/bmt/beatree/allocator"
 )
 
 // Iterator provides ordered iteration over the beatree state.

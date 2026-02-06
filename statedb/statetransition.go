@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/colorfulnotion/jam/common"
-	storage "github.com/colorfulnotion/jam/storage"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/common"
+	storage "github.com/jam-duna/jamduna/storage"
+	"github.com/jam-duna/jamduna/types"
 	"github.com/nsf/jsondiff"
 	"github.com/yudai/gojsondiff"
 	"github.com/yudai/gojsondiff/formatter"

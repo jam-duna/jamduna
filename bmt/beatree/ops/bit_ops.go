@@ -1,7 +1,7 @@
 package ops
 
 import (
-	"github.com/colorfulnotion/jam/bmt/beatree"
+	"github.com/jam-duna/jamduna/bmt/beatree"
 )
 
 // Separate creates a separator key between two keys a and b where b > a.

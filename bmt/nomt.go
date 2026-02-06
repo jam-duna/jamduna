@@ -8,11 +8,11 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/colorfulnotion/jam/bmt/beatree"
-	"github.com/colorfulnotion/jam/bmt/core"
-	"github.com/colorfulnotion/jam/bmt/overlay"
-	"github.com/colorfulnotion/jam/bmt/rollback"
-	"github.com/colorfulnotion/jam/trie"
+	"github.com/jam-duna/jamduna/bmt/beatree"
+	"github.com/jam-duna/jamduna/bmt/core"
+	"github.com/jam-duna/jamduna/bmt/overlay"
+	"github.com/jam-duna/jamduna/bmt/rollback"
+	"github.com/jam-duna/jamduna/trie"
 )
 
 // Nomt is a high-performance, Merkle-tree-based key-value database.

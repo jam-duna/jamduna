@@ -20,12 +20,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/colorfulnotion/jam/common"
-	log "github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/pvm"
-	"github.com/colorfulnotion/jam/pvm/interpreter"
-	"github.com/colorfulnotion/jam/pvm/pvmtypes"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/common"
+	log "github.com/jam-duna/jamduna/log"
+	"github.com/jam-duna/jamduna/pvm"
+	"github.com/jam-duna/jamduna/pvm/interpreter"
+	"github.com/jam-duna/jamduna/pvm/pvmtypes"
+	"github.com/jam-duna/jamduna/types"
 )
 
 var EnablePVMOutputLogs = true

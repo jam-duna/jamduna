@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
-	"github.com/colorfulnotion/jam/common"
+	evmtypes "github.com/jam-duna/jamduna/types"
+	"github.com/jam-duna/jamduna/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

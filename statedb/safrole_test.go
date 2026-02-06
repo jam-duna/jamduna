@@ -14,10 +14,10 @@ import (
 	"reflect"
 	"testing"
 
-	bandersnatch "github.com/colorfulnotion/jam/bandersnatch"
-	"github.com/colorfulnotion/jam/common"
-	jamerrors "github.com/colorfulnotion/jam/jamerrors"
-	"github.com/colorfulnotion/jam/types"
+	bandersnatch "github.com/jam-duna/jamduna/bandersnatch"
+	"github.com/jam-duna/jamduna/common"
+	jamerrors "github.com/jam-duna/jamduna/jamerrors"
+	"github.com/jam-duna/jamduna/types"
 	"github.com/stretchr/testify/require"
 )
 

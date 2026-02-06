@@ -1,7 +1,7 @@
 package rollback
 
 import (
-	"github.com/colorfulnotion/jam/bmt/beatree"
+	"github.com/jam-duna/jamduna/bmt/beatree"
 )
 
 // LookupFunc is a function type for looking up values in the tree.

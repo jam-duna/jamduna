@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/colorfulnotion/jam/bmt/beatree"
-	"github.com/colorfulnotion/jam/bmt/beatree/allocator"
-	"github.com/colorfulnotion/jam/bmt/beatree/branch"
-	"github.com/colorfulnotion/jam/bmt/beatree/leaf"
+	"github.com/jam-duna/jamduna/bmt/beatree"
+	"github.com/jam-duna/jamduna/bmt/beatree/allocator"
+	"github.com/jam-duna/jamduna/bmt/beatree/branch"
+	"github.com/jam-duna/jamduna/bmt/beatree/leaf"
 )
 
 // UpdateResult contains the results of a tree update operation.

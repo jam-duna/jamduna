@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/colorfulnotion/jam/bmt/io"
+	"github.com/jam-duna/jamduna/bmt/io"
 )
 
 const PageSize = 16384 // 16KB pages

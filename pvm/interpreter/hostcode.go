@@ -1,6 +1,6 @@
 package interpreter
 
-import "github.com/colorfulnotion/jam/pvm/pvmtypes"
+import "github.com/jam-duna/jamduna/pvm/pvmtypes"
 
 const (
 	OK   = pvmtypes.OK

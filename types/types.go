@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	//	"math"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 type BMTProof []common.Hash

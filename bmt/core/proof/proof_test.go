@@ -3,7 +3,7 @@ package proof
 import (
 	"testing"
 
-	"github.com/colorfulnotion/jam/bmt/core"
+	"github.com/jam-duna/jamduna/bmt/core"
 )
 
 // TestPathProofEmptyTrie tests proof for empty trie.

@@ -3,7 +3,7 @@ package ops
 import (
 	"testing"
 
-	"github.com/colorfulnotion/jam/bmt/beatree"
+	"github.com/jam-duna/jamduna/bmt/beatree"
 )
 
 func TestPrefixLen(t *testing.T) {

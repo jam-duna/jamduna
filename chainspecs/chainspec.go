@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/storage"
-	"github.com/colorfulnotion/jam/telemetry"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/statedb"
+	"github.com/jam-duna/jamduna/storage"
+	"github.com/jam-duna/jamduna/telemetry"
+	"github.com/jam-duna/jamduna/types"
 
 	"embed"
 )

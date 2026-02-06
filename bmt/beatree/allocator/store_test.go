@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/colorfulnotion/jam/bmt/io"
+	"github.com/jam-duna/jamduna/bmt/io"
 )
 
 // TestStoreFreePagDeallocatesCache verifies that FreePage returns cached pages to the pool.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/colorfulnotion/jam/bmt/beatree/allocator"
+	"github.com/jam-duna/jamduna/bmt/beatree/allocator"
 )
 
 // TestLeafCacheBasic tests basic cache operations.

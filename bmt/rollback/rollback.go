@@ -3,8 +3,8 @@ package rollback
 import (
 	"fmt"
 
-	"github.com/colorfulnotion/jam/bmt/beatree"
-	"github.com/colorfulnotion/jam/bmt/seglog"
+	"github.com/jam-duna/jamduna/bmt/beatree"
+	"github.com/jam-duna/jamduna/bmt/seglog"
 )
 
 // ApplyFunc is a function that applies a changeset.

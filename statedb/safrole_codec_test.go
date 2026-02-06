@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/types"
 )
 
 func TestSafroleCodec(t *testing.T) {

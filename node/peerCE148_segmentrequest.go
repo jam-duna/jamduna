@@ -7,11 +7,11 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/colorfulnotion/jam/common"
-	log "github.com/colorfulnotion/jam/log"
-	telemetry "github.com/colorfulnotion/jam/telemetry"
-	trie "github.com/colorfulnotion/jam/trie"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/common"
+	log "github.com/jam-duna/jamduna/log"
+	telemetry "github.com/jam-duna/jamduna/telemetry"
+	trie "github.com/jam-duna/jamduna/trie"
+	"github.com/jam-duna/jamduna/types"
 	"github.com/quic-go/quic-go"
 )
 

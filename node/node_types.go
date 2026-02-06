@@ -3,7 +3,7 @@ package node
 import (
 	"sync"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 type BlockAnnouncementChecker struct {

@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/colorfulnotion/jam/jamerrors"
-	"github.com/colorfulnotion/jam/pvm"
-	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/storage"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/jamerrors"
+	"github.com/jam-duna/jamduna/pvm"
+	"github.com/jam-duna/jamduna/statedb"
+	"github.com/jam-duna/jamduna/storage"
+	"github.com/jam-duna/jamduna/types"
 )
 
 const (

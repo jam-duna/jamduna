@@ -3,8 +3,8 @@ package merkle
 import (
 	"testing"
 
-	"github.com/colorfulnotion/jam/bmt/core"
-	"github.com/colorfulnotion/jam/bmt/io"
+	"github.com/jam-duna/jamduna/bmt/core"
+	"github.com/jam-duna/jamduna/bmt/io"
 )
 
 func TestWitnessPathCollection(t *testing.T) {

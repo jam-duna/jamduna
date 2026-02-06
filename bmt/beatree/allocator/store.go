@@ -6,7 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/colorfulnotion/jam/bmt/io"
+	"github.com/jam-duna/jamduna/bmt/io"
 )
 
 // Store is a page allocator that manages page allocation with a free list.

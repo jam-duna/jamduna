@@ -230,53 +230,6 @@ jam:
 	mkdir -p $(OUTPUT_DIR)
 	go build -tags=  -o $(OUTPUT_DIR)/$(ARCH)/$(BINARY) .
 
-evm-builder:
-	@echo "Building EVM Builder..."
-	mkdir -p $(OUTPUT_DIR)
-	go build -o $(OUTPUT_DIR)/$(ARCH)/evm-builder ./cmd/evm-builder
-
-orchard-builder:
-	@echo "Building Orchard Builder..."
-	mkdir -p $(OUTPUT_DIR)
-	go build -o $(OUTPUT_DIR)/$(ARCH)/orchard-builder ./cmd/orchard-builder
-
-builders: evm-builder orchard-builder
-	@echo "All builders built successfully"
-
-run_evm_builder:
-	@echo "Building EVM Builder..."
-	@mkdir -p $(OUTPUT_DIR)
-	go build -o $(OUTPUT_DIR)/$(ARCH)/evm-builder ./cmd/evm-builder
-	@echo "Stopping any existing EVM Builder..."
-	@ps aux | grep 'bin/.*[e]vm-builder' | awk '{print $$2}' | while read pid; do kill $$pid 2>/dev/null || true; done
-	@mkdir -p logs
-	@sleep 1
-	@echo "Starting EVM Builder..."
-	@echo "EVM RPC available at: http://localhost:$(EVM_RPC_PORT)"
-	@$(OUTPUT_DIR)/$(ARCH)/evm-builder run --dev-validator 6 --chain $(CHAINSPEC) --pvm-backend $(PVM_BACKEND) --debug rotation,guarantees --evm-rpc-port $(EVM_RPC_PORT) --telemetry localhost:$(TELEMETRY_PORT) 2>&1 | tee logs/evm-builder.log
-
-run_evm_multi:
-	@echo "Running EVM Multi-Round Transfer Test..."
-	@echo "Ensure validators and EVM builder are running first"
-	@mkdir -p logs
-	go test -v -count=1 -timeout 30m -run TestEVMMultiRoundTransfers ./builder/evm/rpc/ 2>&1 | tee logs/evm-multi-test.log
-
-run_evm_single:
-	@echo "Running EVM Single Transfer Test..."
-	@echo "Ensure validators and EVM builder are running first"
-	@mkdir -p logs
-	go test -v -count=1 -run TestEVMBlocksTransfersRPC ./builder/evm/rpc/ 2>&1 | tee logs/evm-single-test.log
-
-run_evm_builder_remote: evm-builder
-	@echo "Stopping any existing EVM Builder..."
-	@ps aux | grep 'bin/.*[e]vm-builder' | awk '{print $$2}' | while read pid; do kill $$pid 2>/dev/null || true; done
-	@rm -rf /root/.jamduna/jam-6
-	@mkdir -p logs
-	@sleep 1
-	@echo "Starting EVM Builder (distributed mode)..."
-	@echo "EVM RPC available at: http://localhost:$(EVM_RPC_PORT)"
-	@$(OUTPUT_DIR)/$(ARCH)/evm-builder run --dev-validator 6 --chain chainspecs/jamduna-distributed-spec.json --pvm-backend $(PVM_BACKEND) --debug rotation,guarantees --evm-rpc-port $(EVM_RPC_PORT) --telemetry localhost:$(TELEMETRY_PORT) 2>&1 | tee logs/remote-evm-builder.log
-
 duna_spec: jam
 	@echo "Generating Duna chainspec (local)..."
 	./$(OUTPUT_DIR)/$(ARCH)/$(BINARY) gen-spec chainspecs/dev-config.json chainspecs/jamduna-spec.json

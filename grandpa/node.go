@@ -6,10 +6,10 @@ import (
 	"math/rand"
 	"sync"
 
-	"github.com/colorfulnotion/jam/bls"
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/bls"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/log"
+	"github.com/jam-duna/jamduna/types"
 )
 
 type MockGrandpaNode struct {

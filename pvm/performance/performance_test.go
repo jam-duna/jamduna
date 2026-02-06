@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/colorfulnotion/jam/pvm/program"
+	"github.com/jam-duna/jamduna/pvm/program"
 )
 
 // TestBenchmarkAllPVMFiles runs performance benchmarks on all .pvm files in services directory

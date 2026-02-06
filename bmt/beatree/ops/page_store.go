@@ -1,6 +1,6 @@
 package ops
 
-import "github.com/colorfulnotion/jam/bmt/beatree/allocator"
+import "github.com/jam-duna/jamduna/bmt/beatree/allocator"
 
 // PageStore is the interface for page storage operations.
 // This allows both the real Store and TestStore to be used.

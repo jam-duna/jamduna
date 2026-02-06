@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/colorfulnotion/jam/grandpa"
+	"github.com/jam-duna/jamduna/grandpa"
 	"github.com/quic-go/quic-go"
 )
 

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/colorfulnotion/jam/bmt/beatree"
+	"github.com/jam-duna/jamduna/bmt/beatree"
 )
 
 // Delta represents a reverse delta that can undo a commit.

@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/colorfulnotion/jam/common"
-	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
-	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/common"
+	evmtypes "github.com/jam-duna/jamduna/types"
+	"github.com/jam-duna/jamduna/log"
+	"github.com/jam-duna/jamduna/types"
 )
 
 // ServiceStateManager handles multi-rollup EVM block tracking.

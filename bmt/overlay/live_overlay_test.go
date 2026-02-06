@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/colorfulnotion/jam/bmt/beatree"
+	"github.com/jam-duna/jamduna/bmt/beatree"
 )
 
 func TestLiveOverlayInsert(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/colorfulnotion/jam/bmt/beatree"
+	"github.com/jam-duna/jamduna/bmt/beatree"
 )
 
 func TestDeltaRoundtrip(t *testing.T) {

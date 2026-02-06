@@ -3,8 +3,8 @@ package overlay
 import (
 	"sync"
 
-	"github.com/colorfulnotion/jam/bmt/beatree"
-	"github.com/colorfulnotion/jam/bmt/beatree/allocator"
+	"github.com/jam-duna/jamduna/bmt/beatree"
+	"github.com/jam-duna/jamduna/bmt/beatree/allocator"
 )
 
 // DirtyPage represents a modified page in an overlay.

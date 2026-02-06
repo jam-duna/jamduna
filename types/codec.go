@@ -11,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/colorfulnotion/jam/log"
+	"github.com/jam-duna/jamduna/log"
 )
 
 type CustomEncoder interface {

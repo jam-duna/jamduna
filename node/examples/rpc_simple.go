@@ -15,7 +15,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/colorfulnotion/jam/node"
+	"github.com/jam-duna/jamduna/node"
 )
 
 const (

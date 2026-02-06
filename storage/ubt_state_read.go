@@ -3,7 +3,7 @@ package storage
 import (
 	"fmt"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 // ReadCodeFromTree reconstructs contract code from a UBT tree snapshot.

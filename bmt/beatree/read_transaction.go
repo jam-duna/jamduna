@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/colorfulnotion/jam/bmt/beatree/allocator"
+	"github.com/jam-duna/jamduna/bmt/beatree/allocator"
 )
 
 // ReadTransaction provides snapshot isolation for read operations.

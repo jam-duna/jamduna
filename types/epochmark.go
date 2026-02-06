@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 // EpochMark (see 6.4 Epoch change Signal) represents the descriptor for parameters to be used in the next epoch

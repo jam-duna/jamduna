@@ -1,7 +1,7 @@
 package bitbox
 
 import (
-	"github.com/colorfulnotion/jam/bmt/core"
+	"github.com/jam-duna/jamduna/bmt/core"
 	"github.com/zeebo/xxh3"
 )
 

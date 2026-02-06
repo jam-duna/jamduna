@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"sort"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 type SOffendersMark struct {

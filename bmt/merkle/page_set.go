@@ -3,8 +3,8 @@ package merkle
 import (
 	"sync"
 
-	"github.com/colorfulnotion/jam/bmt/core"
-	"github.com/colorfulnotion/jam/bmt/io"
+	"github.com/jam-duna/jamduna/bmt/core"
+	"github.com/jam-duna/jamduna/bmt/io"
 )
 
 // PageSet manages a set of pages for batch operations.

@@ -3,7 +3,7 @@ package rollback
 import (
 	"testing"
 
-	"github.com/colorfulnotion/jam/bmt/seglog"
+	"github.com/jam-duna/jamduna/bmt/seglog"
 )
 
 func TestInMemoryPushGet(t *testing.T) {

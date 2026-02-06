@@ -6,10 +6,10 @@ import (
 	"os"
 	"testing"
 
-	"github.com/colorfulnotion/jam/bmt/beatree"
-	"github.com/colorfulnotion/jam/bmt/beatree/allocator"
-	"github.com/colorfulnotion/jam/bmt/beatree/ops"
-	"github.com/colorfulnotion/jam/bmt/io"
+	"github.com/jam-duna/jamduna/bmt/beatree"
+	"github.com/jam-duna/jamduna/bmt/beatree/allocator"
+	"github.com/jam-duna/jamduna/bmt/beatree/ops"
+	"github.com/jam-duna/jamduna/bmt/io"
 )
 
 // TestCoordinatorLayer demonstrates the coordinator layer pattern.

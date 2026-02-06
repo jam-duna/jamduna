@@ -3,7 +3,7 @@ package storage
 import (
 	"fmt"
 
-	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
+	evmtypes "github.com/jam-duna/jamduna/types"
 )
 
 // ApplyStateDelta applies a flattened key/value delta to a UBT tree.

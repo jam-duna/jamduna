@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"reflect"
 
-	bls "github.com/colorfulnotion/jam/bls"
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/types"
+	bls "github.com/jam-duna/jamduna/bls"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/types"
 	"github.com/quic-go/quic-go"
 )
 

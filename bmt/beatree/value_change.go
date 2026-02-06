@@ -1,7 +1,7 @@
 package beatree
 
 import (
-	"github.com/colorfulnotion/jam/bmt/core"
+	"github.com/jam-duna/jamduna/bmt/core"
 )
 
 const (

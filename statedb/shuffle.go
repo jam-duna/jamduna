@@ -3,7 +3,7 @@ package statedb
 import (
 	"encoding/binary"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 // FisherYatesShuffle performs the Fisher-Yates shuffle on a slice of integers.

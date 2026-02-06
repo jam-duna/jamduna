@@ -3,8 +3,8 @@ package interpreter
 import (
 	"fmt"
 
-	"github.com/colorfulnotion/jam/pvm/program"
-	"github.com/colorfulnotion/jam/pvm/trace"
+	"github.com/jam-duna/jamduna/pvm/program"
+	"github.com/jam-duna/jamduna/pvm/trace"
 )
 
 // Import all instruction constants from the unified pvm/program package

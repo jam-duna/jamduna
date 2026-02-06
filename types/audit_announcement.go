@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/ed25519"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/ed25519"
 )
 
 // AuditTrancheAnnouncement should probably just be [trancheIdx]AuditAnnounceBucket

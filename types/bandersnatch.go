@@ -6,7 +6,7 @@ import (
 
 	//"reflect"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 type BandersnatchKey common.Hash

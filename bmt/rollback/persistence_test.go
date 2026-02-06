@@ -3,7 +3,7 @@ package rollback
 import (
 	"testing"
 
-	"github.com/colorfulnotion/jam/bmt/beatree"
+	"github.com/jam-duna/jamduna/bmt/beatree"
 )
 
 // TestRollbackPersistence verifies that currentHead persists across restarts.

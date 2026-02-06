@@ -1,6 +1,6 @@
 package storage
 
-import "github.com/colorfulnotion/jam/common"
+import "github.com/jam-duna/jamduna/common"
 
 // KeyDeriver derives a TreeKey from an address and input key.
 type KeyDeriver interface {

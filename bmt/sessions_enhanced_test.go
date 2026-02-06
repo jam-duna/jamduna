@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/colorfulnotion/jam/bmt/overlay"
+	"github.com/jam-duna/jamduna/bmt/overlay"
 )
 
 // Test Pattern 1: Simple transaction

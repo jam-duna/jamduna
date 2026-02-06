@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/colorfulnotion/jam/bandersnatch"
-	"github.com/colorfulnotion/jam/bls"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/bandersnatch"
+	"github.com/jam-duna/jamduna/bls"
+	"github.com/jam-duna/jamduna/types"
 )
 
 func GenerateSeedSet(ringSize int) ([][]byte, error) {

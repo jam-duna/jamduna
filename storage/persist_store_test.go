@@ -3,7 +3,7 @@ package storage
 import (
 	"testing"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 func TestPersistenceStore_BasicOperations(t *testing.T) {

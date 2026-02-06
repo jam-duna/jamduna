@@ -3,8 +3,8 @@ package statedb
 import (
 	"fmt"
 
-	log "github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/types"
+	log "github.com/jam-duna/jamduna/log"
+	"github.com/jam-duna/jamduna/types"
 )
 
 func (s *StateDB) GetAuthorizeCode(wp types.WorkPackage) (auth_code_real []byte, package_metadata []byte, host uint32, err error) {

@@ -3,7 +3,7 @@ package bitbox
 import (
 	"testing"
 
-	"github.com/colorfulnotion/jam/bmt/core"
+	"github.com/jam-duna/jamduna/bmt/core"
 )
 
 func TestHashPageId(t *testing.T) {

@@ -3,7 +3,7 @@ package beatree
 import (
 	"sync"
 
-	"github.com/colorfulnotion/jam/bmt/beatree/allocator"
+	"github.com/jam-duna/jamduna/bmt/beatree/allocator"
 )
 
 // Shared represents the shared mutable state of the Beatree.

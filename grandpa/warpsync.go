@@ -3,7 +3,7 @@ package grandpa
 import (
 	"fmt"
 
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/types"
 )
 
 /*

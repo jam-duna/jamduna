@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/pvm"
-	"github.com/colorfulnotion/jam/pvm/interpreter"
-	"github.com/colorfulnotion/jam/pvm/recompiler"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/log"
+	"github.com/jam-duna/jamduna/pvm"
+	"github.com/jam-duna/jamduna/pvm/interpreter"
+	"github.com/jam-duna/jamduna/pvm/recompiler"
+	"github.com/jam-duna/jamduna/types"
 )
 
 func TestBundleExecution(t *testing.T) {

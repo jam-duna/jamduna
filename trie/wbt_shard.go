@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 // Full137Resp defines the structure for test cases.

@@ -3,7 +3,7 @@ package types
 import (
 	"testing"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 /* "target": "0x99841f584606ab31badcdf38e8122874a699e0cb3989d8ddc7c0874b8f5f76bf",

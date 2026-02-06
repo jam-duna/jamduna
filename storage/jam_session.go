@@ -1,7 +1,7 @@
 package storage
 
 import (
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 // JAMTrieSession represents an isolated trie session with its own root and staged operations.

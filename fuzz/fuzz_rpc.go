@@ -1,7 +1,7 @@
 package fuzz
 
 import (
-	"github.com/colorfulnotion/jam/statedb"
+	"github.com/jam-duna/jamduna/statedb"
 )
 
 const (

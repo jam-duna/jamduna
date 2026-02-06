@@ -1,9 +1,9 @@
 package statedb
 
 import (
-	bls "github.com/colorfulnotion/jam/bls"
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/types"
+	bls "github.com/jam-duna/jamduna/bls"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/types"
 )
 
 func (s *StateDB) Finalize(v types.ValidatorSecret) (blsSignature bls.Signature, finalizedEpoch uint32, beefy_hash common.Hash, err error) {

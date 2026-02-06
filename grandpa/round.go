@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/log"
 )
 
 // wait_timeout is used to determine whether to wait for the timeout, currently set to true because it's too easy to hit the complete condition

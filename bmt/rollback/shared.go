@@ -4,7 +4,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/colorfulnotion/jam/bmt/seglog"
+	"github.com/jam-duna/jamduna/bmt/seglog"
 )
 
 // Shared provides thread-safe access to rollback state.

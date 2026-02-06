@@ -3,9 +3,9 @@ package node
 import (
 	"fmt"
 
-	log "github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/statedb"
-	types "github.com/colorfulnotion/jam/types"
+	log "github.com/jam-duna/jamduna/log"
+	"github.com/jam-duna/jamduna/statedb"
+	types "github.com/jam-duna/jamduna/types"
 )
 
 func (n *Node) processTicket(ticket types.Ticket) error {
