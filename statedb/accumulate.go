@@ -535,7 +535,7 @@ func (s *StateDB) ParallelizedAccumulate(
 				o.QueueWorkReport = r.XY.U.QueueWorkReport
 			}
 			// UpcomingValidators updated only if UpcomingDirty is set (via DESIGNATE host function)
-			if r.XY.U.UpcomingDirty && r.XY.ServiceIndex == o.PrivilegedState.UpcomingValidatorsServiceID {
+			if r.XY.U.UpcomingDirty && r.XY.ServiceIndex == originalU {
 				if debugValidators && len(r.XY.U.UpcomingValidators) > 0 {
 					validatorsBytes := make([]byte, len(r.XY.U.UpcomingValidators)*336)
 					for i, v := range r.XY.U.UpcomingValidators {
@@ -548,9 +548,7 @@ func (s *StateDB) ParallelizedAccumulate(
 				}
 				o.UpcomingValidators = r.XY.U.UpcomingValidators
 			}
-			// *** TODO: MC to review Owned Privileges implementation below https://graypaper.fluffylabs.dev/#/1c979cb/174904174904?v=0.7.1
-			// PrivilegedState updated only if PrivilegedDirty is set (via BLESS host function)
-			if r.XY.U.PrivilegedDirty && managerState != nil {
+			if r.XY.U.PrivilegedDirty && r.service == m {
 				// always update z
 				for k, v := range managerState.PrivilegedState.AlwaysAccServiceID {
 					o.PrivilegedState.AlwaysAccServiceID[k] = v

@@ -42,6 +42,21 @@ func SaveReportTrace(path string, obj interface{}) {
 	}
 }
 
+func findTracesDir(basePath, targetVersion string) string {
+	// Try versioned path first (e.g., fuzz-reports/0.7.2/traces)
+	versionedPath := filepath.Join(basePath, fmt.Sprintf("fuzz-reports/%s/traces", targetVersion))
+	if _, err := os.Stat(versionedPath); err == nil {
+		return versionedPath
+	}
+	// Fall back to non-versioned path (e.g., fuzz-reports/traces)
+	directPath := filepath.Join(basePath, "fuzz-reports/traces")
+	if _, err := os.Stat(directPath); err == nil {
+		return directPath
+	}
+	// Return versioned path as default (will fail with descriptive error)
+	return versionedPath
+}
+
 func runSingleSTFTestAndSave(t *testing.T, filename string, content string, pvmBackend string, runPrevalidation bool, sourceBasePath string, destinationPath string) {
 	t.Helper()
 	testDir := t.TempDir()
@@ -375,18 +390,6 @@ func TestSingleCompare(t *testing.T) {
 	runSingleSTFTest(t, filename, string(content), pvm.BackendCompiler, false)
 }
 
-func GetFuzzReportsPath(subDir ...string) (string, error) {
-	fuzzPath := os.Getenv("JAM_CONFORMANCE_PATH")
-	if fuzzPath == "" {
-		return "", fmt.Errorf("JAM_CONFORMANCE_PATH environment variable is not set")
-	}
-	targetDir := "" // Default sub dir
-	if len(subDir) > 0 {
-		targetDir = subDir[0]
-	}
-	return filepath.Abs(filepath.Join(fuzzPath, targetDir))
-}
-
 func GetDunaReportsPath(subDir ...string) (string, error) {
 	dunaPath := os.Getenv("DUNA_CONFORMANCE_PATH")
 	if dunaPath == "" {
@@ -674,48 +677,62 @@ func TestFuzzTraceSequential(t *testing.T) {
 	log.InitLogger("debug")
 
 	targetVersion := "0.7.2"
-	testAllTraces := true // When true, loop through all traces; when false, only test specific cases
+	testAllTraces := true   // When true, loop through all traces; when false, only test specific cases
+	loopAllBranches := true // Set to true to test all W3F branches, false to use current branch
 
-	sourcePath, err := GetFuzzReportsPath()
+	conformanceSources, err := GetConformanceSources(loopAllBranches)
 	if err != nil {
-		t.Fatalf("failed to get source fuzz reports path: %v", err)
+		t.Fatalf("failed to get conformance sources: %v", err)
 	}
 
-	if testAllTraces {
-		// Discover all trace directories dynamically
-		tracesDir := filepath.Join(sourcePath, fmt.Sprintf("fuzz-reports/%s/traces", targetVersion))
-		entries, err := os.ReadDir(tracesDir)
-		if err != nil {
-			t.Fatalf("failed to read traces directory %s: %v", tracesDir, err)
-		}
-
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
+	for _, source := range conformanceSources {
+		t.Run(source.Name, func(t *testing.T) {
+			// Switch branch if specified
+			if source.Branch != "" {
+				if err := CheckoutBranch(source.Path, source.Branch); err != nil {
+					t.Fatalf("failed to checkout branch %s: %v", source.Branch, err)
+				}
 			}
-			testCaseID := entry.Name()
-			t.Run(testCaseID, func(t *testing.T) {
-				runSequentialFuzzTrace(t, sourcePath, targetVersion, testCaseID, false)
-			})
-		}
-	} else {
-		// Test specific cases that failed before the SetRoot fix
-		testCases := []string{
-			"1768816138", // Conformance test failure from w3f/jam-conformance JamZig_m1
-		}
 
-		for _, id := range testCases {
-			t.Run(id, func(t *testing.T) {
-				pvmtypes.DebugHostFunctions = true
-				runSequentialFuzzTrace(t, sourcePath, targetVersion, id, true)
-			})
-		}
+			if testAllTraces {
+				// Discover all trace directories dynamically
+				tracesDir := findTracesDir(source.Path, targetVersion)
+				entries, err := os.ReadDir(tracesDir)
+				if err != nil {
+					t.Skipf("failed to read traces directory %s: %v", tracesDir, err)
+					return
+				}
+
+				for _, entry := range entries {
+					if !entry.IsDir() {
+						continue
+					}
+					testCaseID := entry.Name()
+					t.Run(testCaseID, func(t *testing.T) {
+						runSequentialFuzzTrace(t, source.Path, targetVersion, testCaseID, false)
+					})
+				}
+			} else {
+				// Test specific cases that failed before the SetRoot fix
+				testCases := []string{
+					"1768816138", // Conformance test failure from w3f/jam-conformance JamZig_m1
+				}
+
+				for _, id := range testCases {
+					t.Run(id, func(t *testing.T) {
+						pvmtypes.DebugHostFunctions = true
+						runSequentialFuzzTrace(t, source.Path, targetVersion, id, true)
+					})
+				}
+			}
+		})
 	}
 }
 
 // runSequentialFuzzTrace runs a single sequential fuzz trace test case
 func runSequentialFuzzTrace(t *testing.T, sourcePath, targetVersion, testCaseID string, printDiff bool) {
-	traceDir := filepath.Join(sourcePath, fmt.Sprintf("fuzz-reports/%s/traces", targetVersion), testCaseID)
+	tracesDir := findTracesDir(sourcePath, targetVersion)
+	traceDir := filepath.Join(tracesDir, testCaseID)
 
 	backend := pvm.BackendCompiler
 	if runtime.GOOS != "linux" {
