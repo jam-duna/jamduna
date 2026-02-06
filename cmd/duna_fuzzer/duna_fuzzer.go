@@ -86,7 +86,7 @@ func main() {
 		statedb.RecordTime = false
 	}
 
-	fuzzerInfo := fuzz.CreatePeerInfo("duna-fuzzer")
+	fuzzerInfo := fuzz.CreatePeerInfo("jamduna-fuzzer")
 	fuzzerInfo.SetDefaults()
 
 	fmt.Printf("Fuzzer Info:\n\n%s\n\n", fuzzerInfo.Info())

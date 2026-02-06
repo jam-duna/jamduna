@@ -73,7 +73,7 @@ func main() {
 	fmt.Printf("Test Directory: %s\n", testDir)
 	fmt.Printf("Verbose: %v\n\n", verbose)
 
-	fuzzerInfo := fuzz.CreatePeerInfo("duna-fuzzer")
+	fuzzerInfo := fuzz.CreatePeerInfo("jamduna-replay")
 	fuzzerInfo.SetDefaults()
 
 	// Load trace steps
