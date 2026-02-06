@@ -359,8 +359,15 @@ func (vm *VM) hostBless() {
 		}
 	}
 
-	// Set (x'p)_m, (x'p)_a, (x'p)_v
 	vm.X.U.PrivilegedDirty = true
+	oldManager := vm.X.U.PrivilegedState.ManagerServiceID
+	oldAuthQ := vm.X.U.PrivilegedState.AuthQueueServiceID
+	oldUpcoming := vm.X.U.PrivilegedState.UpcomingValidatorsServiceID
+	oldRegistrar := vm.X.U.PrivilegedState.RegistrarServiceID
+	oldAlwaysAcc := vm.X.U.PrivilegedState.AlwaysAccServiceID
+
+	vm.DebugHostFunction(BLESS, "Manager %d=>%d, AuthQueue %v=>%v, UpcomingValidators %d=>%d, Registrar %d=>%d, AlwaysAcc %v=>%v", oldManager, m, oldAuthQ, bold_a, oldUpcoming, v, oldRegistrar, r, oldAlwaysAcc, bold_z)
+
 	vm.X.U.PrivilegedState.ManagerServiceID = uint32(m)
 	vm.X.U.PrivilegedState.AuthQueueServiceID = bold_a
 	vm.X.U.PrivilegedState.UpcomingValidatorsServiceID = uint32(v)
@@ -1113,7 +1120,6 @@ func (vm *VM) hostEject() {
 	if errCode != OK || bold_d.DeletedAccount {
 		vm.WriteRegister(7, WHO)
 		vm.SetHostResultCode(WHO)
-		log.Trace(vm.logging, "EJECT WHO - getXUDS failed", "d", d, "errCode", errCode)
 		return
 	}
 	tst := common.Hash(types.E_l(uint64(vm.X.ServiceIndex), 32))
@@ -1148,13 +1154,11 @@ func (vm *VM) hostEject() {
 		return
 	}
 
-	// Check if D_lookup has any elements and use the last element for expiry check
-	if len(D_lookup) > 0 {
+	if len(D_lookup) == 2 {
 		lastLookupTimeslot := D_lookup[len(D_lookup)-1]
 		expiryTimeslot := lastLookupTimeslot + uint32(types.PreimageExpiryPeriod)
 
 		if expiryTimeslot < vm.Timeslot {
-			// credit balance AFTER expiry check succeeds
 			xs, _ := xContext.GetX_s()
 			xs.IncBalance(bold_d.Balance)
 
@@ -1164,9 +1168,10 @@ func (vm *VM) hostEject() {
 			bold_d.DeletedAccount = true
 			bold_d.Mutable = true
 			log.Trace(vm.logging, "EJECT OK", "d", fmt.Sprintf("%d", d))
+			vm.DebugHostFunction(EJECT, "EJECT OK d %d", d)
 			blobHash := common.BytesToHash(h)
-			bold_d.WriteLookup(blobHash, uint32(l), nil, "trie") // nil means delete the lookup
-			bold_d.WritePreimage(blobHash, []byte{}, "trie")     // []byte{} means delete the preimage. TODO: should be preimage_source
+			bold_d.WriteLookup(blobHash, uint32(l), nil, "trie")
+			bold_d.WritePreimage(blobHash, []byte{}, "trie")
 			return
 		}
 	}
