@@ -3,7 +3,7 @@ package storage
 import (
 	"sync"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 // JAMTrieBackend holds shared infrastructure for JAM trie operations.

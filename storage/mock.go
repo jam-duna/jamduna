@@ -3,7 +3,7 @@ package storage
 import (
 	"fmt"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 // MockStorage provides a minimal storage implementation for testing

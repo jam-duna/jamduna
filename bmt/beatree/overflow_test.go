@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/colorfulnotion/jam/bmt/beatree/allocator"
+	"github.com/jam-duna/jamduna/bmt/beatree/allocator"
 )
 
 // TestEncodeDecodeCell tests overflow cell encoding and decoding.

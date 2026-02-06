@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 // Decoder type for payload decoding functions

@@ -13,13 +13,13 @@ import (
 	"runtime"
 	"sort"
 
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/pvm/program"
-	"github.com/colorfulnotion/jam/pvm/pvmtypes"
-	"github.com/colorfulnotion/jam/pvm/recompiler"
-	"github.com/colorfulnotion/jam/pvm/trace"
-	"github.com/colorfulnotion/jam/types" // go get golang.org/x/example/hello/reverse
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/log"
+	"github.com/jam-duna/jamduna/pvm/program"
+	"github.com/jam-duna/jamduna/pvm/pvmtypes"
+	"github.com/jam-duna/jamduna/pvm/recompiler"
+	"github.com/jam-duna/jamduna/pvm/trace"
+	"github.com/jam-duna/jamduna/types" // go get golang.org/x/example/hello/reverse
 )
 
 // ExecutionContext tracks the state of a specific contract execution context

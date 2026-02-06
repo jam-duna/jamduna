@@ -3,8 +3,8 @@ package storage
 import (
 	"fmt"
 
-	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
-	"github.com/colorfulnotion/jam/common"
+	evmtypes "github.com/jam-duna/jamduna/types"
+	"github.com/jam-duna/jamduna/common"
 )
 
 // InitWitnessCache initializes the witness cache maps

@@ -26,8 +26,8 @@ import (
 	"fmt"
 	"unsafe"
 
-	"github.com/colorfulnotion/jam/common"
-	//"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/common"
+	//"github.com/jam-duna/jamduna/types"
 )
 
 /*

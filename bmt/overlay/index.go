@@ -3,7 +3,7 @@ package overlay
 import (
 	"sync"
 
-	"github.com/colorfulnotion/jam/bmt/beatree"
+	"github.com/jam-duna/jamduna/bmt/beatree"
 )
 
 // Index maps keys to the ancestor index that contains the latest value.

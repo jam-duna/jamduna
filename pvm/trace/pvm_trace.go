@@ -1,6 +1,6 @@
 package trace
 
-import "github.com/colorfulnotion/jam/common"
+import "github.com/jam-duna/jamduna/common"
 
 type SimpleInstruction struct {
 	Opcode  uint8    `json:"opcode"`

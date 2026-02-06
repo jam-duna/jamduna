@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/colorfulnotion/jam/bmt/bitbox"
-	"github.com/colorfulnotion/jam/bmt/core"
+	"github.com/jam-duna/jamduna/bmt/bitbox"
+	"github.com/jam-duna/jamduna/bmt/core"
 )
 
 // Store coordinates BitBox (hash table page storage) with atomic sync.

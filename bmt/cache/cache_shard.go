@@ -3,8 +3,8 @@ package cache
 import (
 	"sync"
 
-	"github.com/colorfulnotion/jam/bmt/core"
-	"github.com/colorfulnotion/jam/bmt/io"
+	"github.com/jam-duna/jamduna/bmt/core"
+	"github.com/jam-duna/jamduna/bmt/io"
 )
 
 // CacheShard represents a single shard of the page cache with LRU eviction.

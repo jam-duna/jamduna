@@ -5,8 +5,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/colorfulnotion/jam/bmt/beatree/allocator"
-	"github.com/colorfulnotion/jam/bmt/io"
+	"github.com/jam-duna/jamduna/bmt/beatree/allocator"
+	"github.com/jam-duna/jamduna/bmt/io"
 )
 
 // WriteoutCoordinator coordinates the writeout phase of sync operations.

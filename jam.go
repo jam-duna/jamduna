@@ -10,19 +10,19 @@ import (
 
 	"fmt"
 
-	"github.com/colorfulnotion/jam/chainspecs"
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/grandpa"
-	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/node"
-	"github.com/colorfulnotion/jam/pvm"
-	"github.com/colorfulnotion/jam/pvm/interpreter"
-	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/telemetry"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/chainspecs"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/grandpa"
+	"github.com/jam-duna/jamduna/log"
+	"github.com/jam-duna/jamduna/node"
+	"github.com/jam-duna/jamduna/pvm"
+	"github.com/jam-duna/jamduna/pvm/interpreter"
+	"github.com/jam-duna/jamduna/statedb"
+	"github.com/jam-duna/jamduna/telemetry"
+	"github.com/jam-duna/jamduna/types"
 	"github.com/spf13/cobra"
 
-	// orchardrpc "github.com/colorfulnotion/jam/builder/orchard/rpc" // Disabled: requires librailgun_service FFI
+	// orchardrpc "github.com/jam-duna/jamduna/builder/orchard/rpc" // Disabled: requires librailgun_service FFI
 
 	"os"
 	"os/signal"

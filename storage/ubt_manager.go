@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/log"
 )
 
 // UBTTreeManager manages UBT trees by root hash (shared across sessions).

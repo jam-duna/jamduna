@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	log "github.com/colorfulnotion/jam/log"
+	log "github.com/jam-duna/jamduna/log"
 )
 
 // WitnessValueKind selects which value column is verified.

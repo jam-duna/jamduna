@@ -1,9 +1,9 @@
 package bmt
 
 import (
-	"github.com/colorfulnotion/jam/bmt/beatree"
-	"github.com/colorfulnotion/jam/bmt/overlay"
-	"github.com/colorfulnotion/jam/bmt/seglog"
+	"github.com/jam-duna/jamduna/bmt/beatree"
+	"github.com/jam-duna/jamduna/bmt/overlay"
+	"github.com/jam-duna/jamduna/bmt/seglog"
 )
 
 // FinishedSession represents a committed transaction.

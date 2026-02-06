@@ -3,7 +3,7 @@ package program
 import (
 	"slices"
 
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/types"
 )
 
 // A.5.4. Instructions with Arguments of Two Immediates.

@@ -9,13 +9,13 @@ import (
 	"strings"
 	"sync"
 
-	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/pvm"
-	"github.com/colorfulnotion/jam/pvm/interpreter"
-	"github.com/colorfulnotion/jam/pvm/pvmtypes"
-	"github.com/colorfulnotion/jam/types"
+	evmtypes "github.com/jam-duna/jamduna/types"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/log"
+	"github.com/jam-duna/jamduna/pvm"
+	"github.com/jam-duna/jamduna/pvm/interpreter"
+	"github.com/jam-duna/jamduna/pvm/pvmtypes"
+	"github.com/jam-duna/jamduna/types"
 	"github.com/gorilla/websocket"
 )
 

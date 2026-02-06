@@ -8,9 +8,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/colorfulnotion/jam/fuzz"
-	"github.com/colorfulnotion/jam/pvm/interpreter"
-	"github.com/colorfulnotion/jam/statedb"
+	"github.com/jam-duna/jamduna/fuzz"
+	"github.com/jam-duna/jamduna/pvm/interpreter"
+	"github.com/jam-duna/jamduna/statedb"
 )
 
 // defaultBackend can be set at build time via -ldflags "-X main.defaultBackend=compiler"

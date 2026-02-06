@@ -1,4 +1,4 @@
-module github.com/colorfulnotion/jam
+module github.com/jam-duna/jamduna
 
 go 1.23.0
 

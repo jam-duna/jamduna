@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"reflect"
 
-	bandersnatch "github.com/colorfulnotion/jam/bandersnatch"
-	"github.com/colorfulnotion/jam/common"
+	bandersnatch "github.com/jam-duna/jamduna/bandersnatch"
+	"github.com/jam-duna/jamduna/common"
 )
 
 /*

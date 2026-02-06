@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/colorfulnotion/jam/bmt/beatree"
-	"github.com/colorfulnotion/jam/bmt/core"
-	"github.com/colorfulnotion/jam/bmt/core/proof"
-	"github.com/colorfulnotion/jam/bmt/overlay"
+	"github.com/jam-duna/jamduna/bmt/beatree"
+	"github.com/jam-duna/jamduna/bmt/core"
+	"github.com/jam-duna/jamduna/bmt/core/proof"
+	"github.com/jam-duna/jamduna/bmt/overlay"
 )
 
 // Enhanced session types for transaction semantics and witness generation

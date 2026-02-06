@@ -3,8 +3,8 @@ package performance
 import (
 	"time"
 
-	"github.com/colorfulnotion/jam/pvm/program"
-	"github.com/colorfulnotion/jam/pvm/recompiler"
+	"github.com/jam-duna/jamduna/pvm/program"
+	"github.com/jam-duna/jamduna/pvm/recompiler"
 )
 
 // CompileStats contains performance statistics for a single compilation

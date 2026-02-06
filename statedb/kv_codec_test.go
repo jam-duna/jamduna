@@ -3,8 +3,8 @@ package statedb
 import (
 	"testing"
 
-	log "github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/types"
+	log "github.com/jam-duna/jamduna/log"
+	"github.com/jam-duna/jamduna/types"
 )
 
 // func TestKV(t *testing.T) {

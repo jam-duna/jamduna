@@ -6,7 +6,7 @@
 package proof
 
 import (
-	"github.com/colorfulnotion/jam/bmt/core"
+	"github.com/jam-duna/jamduna/bmt/core"
 )
 
 // PathProof represents a proof of inclusion/exclusion for a single key.

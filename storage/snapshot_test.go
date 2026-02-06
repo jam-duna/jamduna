@@ -13,9 +13,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
-	// evmverkle "github.com/colorfulnotion/jam/builder/evm/verkle"
-	"github.com/colorfulnotion/jam/common"
+	evmtypes "github.com/jam-duna/jamduna/types"
+	// evmverkle "github.com/jam-duna/jamduna/builder/evm/verkle"
+	"github.com/jam-duna/jamduna/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

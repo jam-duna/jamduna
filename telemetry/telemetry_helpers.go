@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 // Helper functions for parsing telemetry payloads

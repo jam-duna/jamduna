@@ -1,6 +1,6 @@
 package statedb
 
-import "github.com/colorfulnotion/jam/types"
+import "github.com/jam-duna/jamduna/types"
 
 // Section 8.2 - Eq 85+86
 /*

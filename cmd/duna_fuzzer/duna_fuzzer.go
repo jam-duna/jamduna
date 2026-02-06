@@ -10,11 +10,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/fuzz"
-	"github.com/colorfulnotion/jam/pvm"
-	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/fuzz"
+	"github.com/jam-duna/jamduna/pvm"
+	"github.com/jam-duna/jamduna/statedb"
+	"github.com/jam-duna/jamduna/types"
 )
 
 //go:embed refine/*.bin

@@ -11,10 +11,10 @@ import (
 	"path"
 	"testing"
 
-	"github.com/colorfulnotion/jam/common"
-	jamerrors "github.com/colorfulnotion/jam/jamerrors"
-	log "github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/common"
+	jamerrors "github.com/jam-duna/jamduna/jamerrors"
+	log "github.com/jam-duna/jamduna/log"
+	"github.com/jam-duna/jamduna/types"
 )
 
 type AssuranceInput struct {

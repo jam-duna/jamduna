@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/types"
 )
 
 func TestGrandpa(t *testing.T) {

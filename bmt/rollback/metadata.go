@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/colorfulnotion/jam/bmt/seglog"
+	"github.com/jam-duna/jamduna/bmt/seglog"
 )
 
 const (

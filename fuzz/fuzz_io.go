@@ -11,8 +11,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/statedb"
+	"github.com/jam-duna/jamduna/types"
 )
 
 func ReadStateTransitionBIN(filename string) (stf *statedb.StateTransition, err error) {

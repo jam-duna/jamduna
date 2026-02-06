@@ -3,7 +3,7 @@ package rollback
 import (
 	"sync"
 
-	"github.com/colorfulnotion/jam/bmt/seglog"
+	"github.com/jam-duna/jamduna/bmt/seglog"
 )
 
 // InMemory is a ring buffer for recent deltas stored in memory.

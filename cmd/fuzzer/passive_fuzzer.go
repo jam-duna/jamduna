@@ -8,9 +8,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/colorfulnotion/jam/fuzz"
-	"github.com/colorfulnotion/jam/pvm"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/fuzz"
+	"github.com/jam-duna/jamduna/pvm"
+	"github.com/jam-duna/jamduna/types"
 )
 
 func main() {

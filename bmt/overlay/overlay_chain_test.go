@@ -3,7 +3,7 @@ package overlay
 import (
 	"testing"
 
-	"github.com/colorfulnotion/jam/bmt/beatree"
+	"github.com/jam-duna/jamduna/bmt/beatree"
 )
 
 func TestOverlayChainDepth(t *testing.T) {

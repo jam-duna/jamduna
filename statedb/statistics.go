@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"math"
 
-	jamerrors "github.com/colorfulnotion/jam/jamerrors"
-	"github.com/colorfulnotion/jam/types"
+	jamerrors "github.com/jam-duna/jamduna/jamerrors"
+	"github.com/jam-duna/jamduna/types"
 )
 
 type accumulateStatistics struct {

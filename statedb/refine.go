@@ -8,16 +8,16 @@ import (
 	"reflect"
 	"time"
 
-	bls "github.com/colorfulnotion/jam/bls"
-	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
-	"github.com/colorfulnotion/jam/common"
-	log "github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/pvm/interpreter"
-	"github.com/colorfulnotion/jam/pvm/program"
-	"github.com/colorfulnotion/jam/storage"
-	"github.com/colorfulnotion/jam/telemetry"
-	"github.com/colorfulnotion/jam/trie"
-	types "github.com/colorfulnotion/jam/types"
+	bls "github.com/jam-duna/jamduna/bls"
+	evmtypes "github.com/jam-duna/jamduna/types"
+	"github.com/jam-duna/jamduna/common"
+	log "github.com/jam-duna/jamduna/log"
+	"github.com/jam-duna/jamduna/pvm/interpreter"
+	"github.com/jam-duna/jamduna/pvm/program"
+	"github.com/jam-duna/jamduna/storage"
+	"github.com/jam-duna/jamduna/telemetry"
+	"github.com/jam-duna/jamduna/trie"
+	types "github.com/jam-duna/jamduna/types"
 )
 
 const (

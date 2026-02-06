@@ -20,7 +20,7 @@ import (
 	"errors"
 	"unsafe"
 
-	"github.com/colorfulnotion/jam/log"
+	"github.com/jam-duna/jamduna/log"
 )
 
 type DoublePublicKey [DoubleKeyLen]byte

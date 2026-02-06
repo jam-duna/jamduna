@@ -1,8 +1,8 @@
 package fuzz
 
 import (
-	"github.com/colorfulnotion/jam/jamerrors"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/jamerrors"
+	"github.com/jam-duna/jamduna/types"
 )
 
 // Not sorted work reports within a verdict

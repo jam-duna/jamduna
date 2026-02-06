@@ -3,7 +3,7 @@ package bitbox
 import (
 	"fmt"
 
-	"github.com/colorfulnotion/jam/bmt/core"
+	"github.com/jam-duna/jamduna/bmt/core"
 )
 
 // BucketExhaustion is returned when the hash table is too full to allocate a new bucket.

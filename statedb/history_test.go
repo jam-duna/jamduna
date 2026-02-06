@@ -7,9 +7,9 @@ import (
 	"path"
 	"testing"
 
-	"github.com/colorfulnotion/jam/common"
-	trie "github.com/colorfulnotion/jam/trie"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/common"
+	trie "github.com/jam-duna/jamduna/trie"
+	"github.com/jam-duna/jamduna/types"
 	//"reflect"
 )
 

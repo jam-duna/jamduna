@@ -8,14 +8,14 @@ import (
 	"testing"
 	"time"
 
-	chainspecs "github.com/colorfulnotion/jam/chainspecs"
-	"github.com/colorfulnotion/jam/common"
-	log "github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/pvm"
-	"github.com/colorfulnotion/jam/storage"
-	"github.com/colorfulnotion/jam/statedb"
-	telemetry "github.com/colorfulnotion/jam/telemetry"
-	types "github.com/colorfulnotion/jam/types"
+	chainspecs "github.com/jam-duna/jamduna/chainspecs"
+	"github.com/jam-duna/jamduna/common"
+	log "github.com/jam-duna/jamduna/log"
+	"github.com/jam-duna/jamduna/pvm"
+	"github.com/jam-duna/jamduna/storage"
+	"github.com/jam-duna/jamduna/statedb"
+	telemetry "github.com/jam-duna/jamduna/telemetry"
+	types "github.com/jam-duna/jamduna/types"
 )
 
 const (

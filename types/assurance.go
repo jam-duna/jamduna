@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"reflect"
 
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/ed25519"
-	jamerrors "github.com/colorfulnotion/jam/jamerrors"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/ed25519"
+	jamerrors "github.com/jam-duna/jamduna/jamerrors"
 )
 
 /*

@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/colorfulnotion/jam/statedb"
+	"github.com/jam-duna/jamduna/statedb"
 )
 
 const (

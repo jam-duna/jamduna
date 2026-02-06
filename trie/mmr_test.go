@@ -3,7 +3,7 @@ package trie
 import (
 	"testing"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 // Recent History Test

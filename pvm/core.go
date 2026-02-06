@@ -3,9 +3,9 @@ package pvm
 import (
 	"fmt"
 
-	"github.com/colorfulnotion/jam/pvm/program"
-	"github.com/colorfulnotion/jam/pvm/pvmtypes"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/pvm/program"
+	"github.com/jam-duna/jamduna/pvm/pvmtypes"
+	"github.com/jam-duna/jamduna/types"
 )
 
 const (

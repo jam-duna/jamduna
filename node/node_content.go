@@ -5,11 +5,11 @@ import (
 	"net"
 	"strings"
 
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/pvm"
-	"github.com/colorfulnotion/jam/statedb"
-	telemetry "github.com/colorfulnotion/jam/telemetry"
-	types "github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/pvm"
+	"github.com/jam-duna/jamduna/statedb"
+	telemetry "github.com/jam-duna/jamduna/telemetry"
+	types "github.com/jam-duna/jamduna/types"
 )
 
 func (n *NodeContent) GetBlockTree() *types.BlockTree {

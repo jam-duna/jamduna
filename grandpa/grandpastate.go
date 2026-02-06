@@ -3,7 +3,7 @@ package grandpa
 import (
 	"reflect"
 
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/types"
 )
 
 /*

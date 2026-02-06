@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/colorfulnotion/jam/bmt/cache"
-	"github.com/colorfulnotion/jam/bmt/core"
-	"github.com/colorfulnotion/jam/bmt/io"
+	"github.com/jam-duna/jamduna/bmt/cache"
+	"github.com/jam-duna/jamduna/bmt/core"
+	"github.com/jam-duna/jamduna/bmt/io"
 )
 
 // Updater coordinates parallel merkle tree updates using worker pools and page caching.

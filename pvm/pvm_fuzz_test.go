@@ -12,10 +12,10 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/colorfulnotion/jam/pvm/interpreter"
-	"github.com/colorfulnotion/jam/pvm/pvmtypes"
-	"github.com/colorfulnotion/jam/pvm/recompiler"
-	"github.com/colorfulnotion/jam/pvm/testutil"
+	"github.com/jam-duna/jamduna/pvm/interpreter"
+	"github.com/jam-duna/jamduna/pvm/pvmtypes"
+	"github.com/jam-duna/jamduna/pvm/recompiler"
+	"github.com/jam-duna/jamduna/pvm/testutil"
 )
 
 // FuzzResult holds execution result from a backend

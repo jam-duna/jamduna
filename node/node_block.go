@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/colorfulnotion/jam/common"
-	log "github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/common"
+	log "github.com/jam-duna/jamduna/log"
+	"github.com/jam-duna/jamduna/types"
 )
 
 func (p *Peer) GetOneBlock(headerHash common.Hash, ctx context.Context) ([]types.Block, error) {

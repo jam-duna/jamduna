@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	storage "github.com/colorfulnotion/jam/storage"
-	"github.com/colorfulnotion/jam/types"
+	storage "github.com/jam-duna/jamduna/storage"
+	"github.com/jam-duna/jamduna/types"
 	"github.com/yudai/gojsondiff"
 	"github.com/yudai/gojsondiff/formatter"
 )

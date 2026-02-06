@@ -3,7 +3,7 @@ package types
 import (
 	"reflect"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 // TicketBody represents the structure of a ticket

@@ -4,8 +4,8 @@ import (
 	"os"
 	"testing"
 	
-	"github.com/colorfulnotion/jam/bmt/beatree/allocator"
-	"github.com/colorfulnotion/jam/bmt/io"
+	"github.com/jam-duna/jamduna/bmt/beatree/allocator"
+	"github.com/jam-duna/jamduna/bmt/io"
 )
 
 func TestWritePageError(t *testing.T) {

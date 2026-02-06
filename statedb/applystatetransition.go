@@ -6,12 +6,12 @@ import (
 	"sort"
 	"time"
 
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/jamerrors"
-	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/sdbtiming"
-	"github.com/colorfulnotion/jam/trie"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/jamerrors"
+	"github.com/jam-duna/jamduna/log"
+	"github.com/jam-duna/jamduna/sdbtiming"
+	"github.com/jam-duna/jamduna/trie"
+	"github.com/jam-duna/jamduna/types"
 )
 
 var benchRec = sdbtiming.New()

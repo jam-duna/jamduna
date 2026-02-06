@@ -29,20 +29,20 @@ import (
 	"sync"
 	"time"
 
-	bls "github.com/colorfulnotion/jam/bls"
-	"github.com/colorfulnotion/jam/bmt/core"
-	evmrpc "github.com/colorfulnotion/jam/builder/evm/rpc"
-	chainspecs "github.com/colorfulnotion/jam/chainspecs"
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/ed25519"
-	grandpa "github.com/colorfulnotion/jam/grandpa"
-	log "github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/pvm"
-	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/storage"
-	telemetry "github.com/colorfulnotion/jam/telemetry"
-	trie "github.com/colorfulnotion/jam/trie"
-	types "github.com/colorfulnotion/jam/types"
+	bls "github.com/jam-duna/jamduna/bls"
+	"github.com/jam-duna/jamduna/bmt/core"
+	evmrpc "github.com/jam-duna/jamduna/types"
+	chainspecs "github.com/jam-duna/jamduna/chainspecs"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/ed25519"
+	grandpa "github.com/jam-duna/jamduna/grandpa"
+	log "github.com/jam-duna/jamduna/log"
+	"github.com/jam-duna/jamduna/pvm"
+	"github.com/jam-duna/jamduna/statedb"
+	"github.com/jam-duna/jamduna/storage"
+	telemetry "github.com/jam-duna/jamduna/telemetry"
+	trie "github.com/jam-duna/jamduna/trie"
+	types "github.com/jam-duna/jamduna/types"
 
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/qlog"
@@ -201,10 +201,6 @@ type NodeContent struct {
 
 	jceManagerMutex sync.Mutex
 	jceManager      *ManualJCEManager
-
-	// DEPRECATED: Ethereum transaction pool - moved to EVMServiceHandler
-	// This will be removed in a future version
-	txPool *evmrpc.TxPool
 }
 
 // TODO: add in serviceIDs

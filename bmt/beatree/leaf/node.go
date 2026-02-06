@@ -3,8 +3,8 @@ package leaf
 import (
 	"fmt"
 
-	"github.com/colorfulnotion/jam/bmt/beatree"
-	"github.com/colorfulnotion/jam/bmt/beatree/allocator"
+	"github.com/jam-duna/jamduna/bmt/beatree"
+	"github.com/jam-duna/jamduna/bmt/beatree/allocator"
 )
 
 // ValueType indicates whether a value is inline or overflow.

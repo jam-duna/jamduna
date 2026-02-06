@@ -3,7 +3,7 @@ package types
 import (
 	"encoding/json"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 /*

@@ -6,8 +6,8 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/colorfulnotion/jam/bmt/core"
-	"github.com/colorfulnotion/jam/bmt/io"
+	"github.com/jam-duna/jamduna/bmt/core"
+	"github.com/jam-duna/jamduna/bmt/io"
 )
 
 // UpdatePool manages a pool of workers for parallel merkle tree updates.

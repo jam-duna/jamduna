@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/colorfulnotion/jam/storage"
+	"github.com/jam-duna/jamduna/storage"
 	"github.com/stretchr/testify/require"
 )
 

@@ -1,10 +1,10 @@
 package pvm
 
 import (
-	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/pvm/pvmtypes"
-	"github.com/colorfulnotion/jam/pvm/recompiler"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/log"
+	"github.com/jam-duna/jamduna/pvm/pvmtypes"
+	"github.com/jam-duna/jamduna/pvm/recompiler"
+	"github.com/jam-duna/jamduna/types"
 )
 
 type Recompiler struct {

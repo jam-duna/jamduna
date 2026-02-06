@@ -1,7 +1,7 @@
 package trie
 
 import (
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 type BMTInterface interface {

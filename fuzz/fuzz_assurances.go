@@ -3,9 +3,9 @@ package fuzz
 import (
 	"math/rand"
 
-	"github.com/colorfulnotion/jam/jamerrors"
-	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/jamerrors"
+	"github.com/jam-duna/jamduna/statedb"
+	"github.com/jam-duna/jamduna/types"
 )
 
 func randomAssurance(r *rand.Rand, block *types.Block) *types.Assurance {

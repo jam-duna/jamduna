@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/fuzz"
-	"github.com/colorfulnotion/jam/pvm"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/fuzz"
+	"github.com/jam-duna/jamduna/pvm"
 )
 
 const (

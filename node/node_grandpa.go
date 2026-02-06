@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/colorfulnotion/jam/bls"
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/grandpa"
-	log "github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/bls"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/grandpa"
+	log "github.com/jam-duna/jamduna/log"
+	"github.com/jam-duna/jamduna/types"
 )
 
 // this function will be called when the nodes finish audited the genesis block

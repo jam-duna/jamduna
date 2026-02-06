@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 	"github.com/ethereum/go-ethereum/rlp"
 )
 

@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/types"
 )
 
 // Solves Missing service representation in state.json -- https://github.com/jam-duna/jamtestnet/issues/51

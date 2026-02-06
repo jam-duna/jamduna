@@ -17,12 +17,12 @@ import (
 	"testing"
 	"time"
 
-	chainspecs "github.com/colorfulnotion/jam/chainspecs"
-	"github.com/colorfulnotion/jam/common"
-	grandpa "github.com/colorfulnotion/jam/grandpa"
-	"github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/pvm"
-	"github.com/colorfulnotion/jam/types"
+	chainspecs "github.com/jam-duna/jamduna/chainspecs"
+	"github.com/jam-duna/jamduna/common"
+	grandpa "github.com/jam-duna/jamduna/grandpa"
+	"github.com/jam-duna/jamduna/log"
+	"github.com/jam-duna/jamduna/pvm"
+	"github.com/jam-duna/jamduna/types"
 	"golang.org/x/exp/rand"
 )
 

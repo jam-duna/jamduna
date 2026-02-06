@@ -8,8 +8,8 @@ import (
 	"encoding/binary"
 	"io"
 
-	"github.com/colorfulnotion/jam/common"
-	jamerrors "github.com/colorfulnotion/jam/jamerrors"
+	"github.com/jam-duna/jamduna/common"
+	jamerrors "github.com/jam-duna/jamduna/jamerrors"
 )
 
 // Guarantee discard reasons used for telemetry instrumentation.

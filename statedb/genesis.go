@@ -9,12 +9,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/colorfulnotion/jam/common"
-	"github.com/colorfulnotion/jam/grandpa"
-	log "github.com/colorfulnotion/jam/log"
-	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
-	storage "github.com/colorfulnotion/jam/storage"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/common"
+	"github.com/jam-duna/jamduna/grandpa"
+	log "github.com/jam-duna/jamduna/log"
+	evmtypes "github.com/jam-duna/jamduna/types"
+	storage "github.com/jam-duna/jamduna/storage"
+	"github.com/jam-duna/jamduna/types"
 )
 
 const isIncludeEVM = true

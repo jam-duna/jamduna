@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/colorfulnotion/jam/common"
+	"github.com/jam-duna/jamduna/common"
 )
 
 type StateUpdate struct {

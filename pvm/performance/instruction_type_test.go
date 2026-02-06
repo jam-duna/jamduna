@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/colorfulnotion/jam/pvm"
-	"github.com/colorfulnotion/jam/pvm/testutil"
-	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/pvm"
+	"github.com/jam-duna/jamduna/pvm/testutil"
+	"github.com/jam-duna/jamduna/statedb"
+	"github.com/jam-duna/jamduna/types"
 )
 
 func TestSimpleTestServiceInstructionTypes(t *testing.T) {

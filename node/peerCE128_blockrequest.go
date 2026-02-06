@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/colorfulnotion/jam/common"
-	log "github.com/colorfulnotion/jam/log"
-	telemetry "github.com/colorfulnotion/jam/telemetry"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/common"
+	log "github.com/jam-duna/jamduna/log"
+	telemetry "github.com/jam-duna/jamduna/telemetry"
+	"github.com/jam-duna/jamduna/types"
 	"github.com/quic-go/quic-go"
 )
 

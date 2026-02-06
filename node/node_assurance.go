@@ -9,12 +9,12 @@ import (
 	"runtime"
 	"slices"
 
-	"github.com/colorfulnotion/jam/common"
-	log "github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/statedb"
-	"github.com/colorfulnotion/jam/storage"
-	trie "github.com/colorfulnotion/jam/trie"
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/common"
+	log "github.com/jam-duna/jamduna/log"
+	"github.com/jam-duna/jamduna/statedb"
+	"github.com/jam-duna/jamduna/storage"
+	trie "github.com/jam-duna/jamduna/trie"
+	"github.com/jam-duna/jamduna/types"
 )
 
 func (n *Node) markAssuring(workPackageHash common.Hash) {

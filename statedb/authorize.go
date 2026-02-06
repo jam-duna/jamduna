@@ -1,7 +1,7 @@
 package statedb
 
 import (
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/types"
 )
 
 type AuthorizeCode struct {

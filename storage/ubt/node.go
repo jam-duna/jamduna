@@ -1,6 +1,6 @@
 package ubt
 
-import "github.com/colorfulnotion/jam/storage"
+import "github.com/jam-duna/jamduna/storage"
 
 type NodeType uint8
 

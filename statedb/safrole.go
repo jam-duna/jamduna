@@ -6,17 +6,17 @@ import (
 	"reflect"
 	"time"
 
-	bandersnatch "github.com/colorfulnotion/jam/bandersnatch"
-	log "github.com/colorfulnotion/jam/log"
-	"github.com/colorfulnotion/jam/types"
+	bandersnatch "github.com/jam-duna/jamduna/bandersnatch"
+	log "github.com/jam-duna/jamduna/log"
+	"github.com/jam-duna/jamduna/types"
 
 	"encoding/json"
 	"errors"
 	"sort"
 	"sync"
 
-	"github.com/colorfulnotion/jam/common"
-	jamerrors "github.com/colorfulnotion/jam/jamerrors"
+	"github.com/jam-duna/jamduna/common"
+	jamerrors "github.com/jam-duna/jamduna/jamerrors"
 )
 
 const (

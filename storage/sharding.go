@@ -1,8 +1,8 @@
 package storage
 
 import (
-	"github.com/colorfulnotion/jam/common"
-	evmtypes "github.com/colorfulnotion/jam/builder/evm/types"
+	"github.com/jam-duna/jamduna/common"
+	evmtypes "github.com/jam-duna/jamduna/types"
 )
 
 type ShardedTxPool struct {

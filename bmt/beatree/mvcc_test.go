@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/colorfulnotion/jam/bmt/beatree/allocator"
+	"github.com/jam-duna/jamduna/bmt/beatree/allocator"
 )
 
 func setupMVCCTest(t *testing.T) (*Shared, *ReadTransactionCounter) {

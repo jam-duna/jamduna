@@ -3,7 +3,7 @@ package ubt
 import (
 	"testing"
 
-	"github.com/colorfulnotion/jam/storage"
+	"github.com/jam-duna/jamduna/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/colorfulnotion/jam/types"
+	"github.com/jam-duna/jamduna/types"
 )
 
 // OpcodeNames maps opcode values to their string names
