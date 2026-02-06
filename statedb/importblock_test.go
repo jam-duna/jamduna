@@ -713,9 +713,15 @@ func TestFuzzTraceSequential(t *testing.T) {
 					})
 				}
 			} else {
-				// Test specific cases that failed before the SetRoot fix
+				// Test specific cases
 				testCases := []string{
-					"1768816138", // Conformance test failure from w3f/jam-conformance JamZig_m1
+					// "1768816138", // Conformance test failure from w3f/jam-conformance JamZig_m1
+					// "1768864701", //from javajam eject ..to check
+					// "1768945074", //from javajam eject to check
+					// "1769427369_3089", //jampy --validator problem
+					// "1769433291_7245", //jampy --validator problem
+					// "1769433291_8332", //jampy --validator problem
+					"1769631850_5575", // jampy --validator problem
 				}
 
 				for _, id := range testCases {
