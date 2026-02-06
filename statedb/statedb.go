@@ -949,13 +949,13 @@ func (s *StateDB) ApplyStateTransitionPreimages(preimages []types.Preimages, tar
 	// (12.42)
 	validPreimages := preimages[:0]
 	for _, l := range preimages {
+		num_preimages++
+		num_octets += l.BlobLength() //Statistics will still count all preimages even if invalid
 		_, err := s.ValidateAddPreimageWithUpdatedService(l.Requester, l.Blob, ServiceAccounts)
 		if err != nil {
 			continue
 		}
 		validPreimages = append(validPreimages, l)
-		num_preimages++
-		num_octets += l.BlobLength()
 	}
 	preimages = validPreimages
 

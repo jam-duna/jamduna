@@ -104,11 +104,11 @@ func PrintGitStatus(repoPath, label string) {
 func CheckoutBranch(repoPath, branch string) error {
 	// Checkout the remote tracking branch directly to get latest
 	remoteRef := fmt.Sprintf("origin/%s", branch)
-	cmd := exec.Command("git", "-C", repoPath, "checkout", remoteRef)
+	cmd := exec.Command("git", "-C", repoPath, "checkout", "-f", remoteRef)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// Fallback: try checking out local branch
-		cmd = exec.Command("git", "-C", repoPath, "checkout", branch)
+		cmd = exec.Command("git", "-C", repoPath, "checkout", "-f", branch)
 		output, err = cmd.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("failed to checkout branch %s: %w\n%s", branch, err, string(output))
