@@ -30,11 +30,10 @@ type StateTransition struct {
 }
 
 // DefaultPruneDepth is the number of slots of state history to keep in memory.
-const DefaultPruneDepth = 128
+const DefaultPruneDepth = 64
 
 // PruneInterval is how often (in slots) to run the pruning process.
-// Set to match DefaultPruneDepth to ensure consistent pruning behavior.
-const PruneInterval = DefaultPruneDepth
+const PruneInterval = 32
 
 type stateEntry struct {
 	stateRoot common.Hash
@@ -215,8 +214,19 @@ func (t *Target) onInitialize(req *Initialize) *Message {
 	// Reset the trie to avoid pollution from previous state
 	// This ensures the state root is computed purely from the provided KeyVals
 	t.store.ResetTrie()
-	t.stateDBMap = make(map[common.Hash]stateEntry)
-	t.lastPrunedSlot = 0
+
+	// Reset lastPrunedSlot if this Initialize is for an earlier slot (new test started)
+	if req.Header.Slot < t.lastPrunedSlot {
+		if t.debugState {
+			log.Printf("%s[INIT_RESET]%s Slot %d: Trie reset, lastPrunedSlot (was %d) -> 0 (new test detected), stateDBMap kept (%d entries)%s", common.ColorYellow, common.ColorReset, req.Header.Slot, t.lastPrunedSlot, len(t.stateDBMap), common.ColorReset)
+		}
+		t.lastPrunedSlot = 0
+	} else {
+		if t.debugState {
+			log.Printf("%s[INIT_RESET]%s Slot %d: Trie reset, lastPrunedSlot remains %d (continuing test), stateDBMap kept (%d entries)%s", common.ColorYellow, common.ColorReset, req.Header.Slot, t.lastPrunedSlot, len(t.stateDBMap), common.ColorReset)
+		}
+	}
+	// Note: stateDBMap is NOT cleared - it accumulates across the session and pruning removes old entries
 	// Note: headerHash -> stateRoot mappings in LevelDB persist across trie resets within the same session
 	// Each fuzzer run (socket connection) has a unique sessionID namespace
 
@@ -558,14 +568,21 @@ func (t *Target) getExportedSegments(requestHash common.Hash) ([][]byte, bool) {
 func (t *Target) pruneOldStates(currentSlot uint32) {
 	// Only prune periodically to reduce overhead
 	if currentSlot < t.lastPrunedSlot+PruneInterval {
+		if t.debugState {
+			log.Printf("%s[PRUNE_SKIP]%s Slot %d: too soon (lastPruned=%d, interval=%d, next=%d)%s", common.ColorGray, common.ColorReset, currentSlot, t.lastPrunedSlot, PruneInterval, t.lastPrunedSlot+PruneInterval, common.ColorReset)
+		}
 		return
 	}
-	t.lastPrunedSlot = currentSlot
 
 	cutoffSlot := uint32(0)
 	if currentSlot > DefaultPruneDepth {
 		cutoffSlot = currentSlot - DefaultPruneDepth
 	}
+
+	if t.debugState {
+		log.Printf("%s[PRUNE_START]%s Slot %d: cutoffSlot=%d, stateCount=%d, lastPruned=%d%s", common.ColorYellow, common.ColorReset, currentSlot, cutoffSlot, len(t.stateDBMap), t.lastPrunedSlot, common.ColorReset)
+	}
+	t.lastPrunedSlot = currentSlot
 
 	// Count states before pruning
 	statesBeforePrune := len(t.stateDBMap)
@@ -576,8 +593,7 @@ func (t *Target) pruneOldStates(currentSlot uint32) {
 		if entry.slot < cutoffSlot {
 			delete(t.stateDBMap, headerHash)
 			if t.debugState {
-				log.Printf("%s[PRUNE]%s Removed state for HeaderHash=%s at slot %d (cutoff=%d)%s",
-					common.ColorYellow, common.ColorReset, headerHash.Hex(), entry.slot, cutoffSlot, common.ColorReset)
+				log.Printf("%s[PRUNE]%s Removed state for HeaderHash=%s at slot %d (cutoff=%d)%s", common.ColorYellow, common.ColorReset, headerHash.Hex(), entry.slot, cutoffSlot, common.ColorReset)
 			}
 		}
 	}
@@ -589,8 +605,7 @@ func (t *Target) pruneOldStates(currentSlot uint32) {
 		if entry.slot < cutoffSlot {
 			oldLookupEntries = append(oldLookupEntries, requestHash)
 			if t.debugState {
-				log.Printf("%s[PRUNE]%s Marking export lookup for removal: RequestHash=%s at slot %d (cutoff=%d)%s",
-					common.ColorYellow, common.ColorReset, requestHash.Hex(), entry.slot, cutoffSlot, common.ColorReset)
+				log.Printf("%s[PRUNE]%s Marking export lookup for removal: RequestHash=%s at slot %d (cutoff=%d)%s", common.ColorYellow, common.ColorReset, requestHash.Hex(), entry.slot, cutoffSlot, common.ColorReset)
 			}
 		}
 	}
@@ -609,8 +624,7 @@ func (t *Target) pruneOldStates(currentSlot uint32) {
 		if !referencedHashes[segmentsHash] {
 			delete(t.exportsData, segmentsHash)
 			if t.debugState {
-				log.Printf("%s[PRUNE]%s Removed unreferenced export data: SegmentsHash=%s%s",
-					common.ColorYellow, common.ColorReset, segmentsHash.Hex(), common.ColorReset)
+				log.Printf("%s[PRUNE]%s Removed unreferenced export data: SegmentsHash=%s%s", common.ColorYellow, common.ColorReset, segmentsHash.Hex(), common.ColorReset)
 			}
 		}
 	}
@@ -618,12 +632,12 @@ func (t *Target) pruneOldStates(currentSlot uint32) {
 	statesAfterPrune := len(t.stateDBMap)
 	exportsAfterPrune := len(t.exportsLookup)
 
-	if statesBeforePrune > statesAfterPrune || exportsBeforePrune > exportsAfterPrune {
-		log.Printf("%s[PRUNE]%s Slot %d: Pruned %d states (%d -> %d), %d exports (%d -> %d)%s",
-			common.ColorYellow, common.ColorReset, currentSlot,
-			statesBeforePrune-statesAfterPrune, statesBeforePrune, statesAfterPrune,
-			exportsBeforePrune-exportsAfterPrune, exportsBeforePrune, exportsAfterPrune,
-			common.ColorReset)
+	if t.debugState {
+		if statesBeforePrune > statesAfterPrune || exportsBeforePrune > exportsAfterPrune {
+			log.Printf("%s[PRUNE]%s Slot %d: Pruned %d states (%d -> %d), %d exports (%d -> %d)%s", common.ColorYellow, common.ColorReset, currentSlot, statesBeforePrune-statesAfterPrune, statesBeforePrune, statesAfterPrune, exportsBeforePrune-exportsAfterPrune, exportsBeforePrune, exportsAfterPrune, common.ColorReset)
+		} else {
+			log.Printf("%s[PRUNE]%s Slot %d: Nothing to prune (cutoff=%d, all %d states are >= cutoff)%s", common.ColorYellow, common.ColorReset, currentSlot, cutoffSlot, statesBeforePrune, common.ColorReset)
+		}
 	}
 }
 
