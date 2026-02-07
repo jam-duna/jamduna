@@ -43,7 +43,7 @@ func main() {
 	fReg.ProcessRegistry()
 
 	// Define the target's identity.
-	targetInfo := fuzz.CreatePeerInfo("duna-target")
+	targetInfo := fuzz.CreatePeerInfo("jamduna-target")
 	targetInfo.SetDefaults()
 
 	fmt.Printf("Target Info:\n\n%s\n\n", targetInfo.Info())

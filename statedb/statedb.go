@@ -1223,9 +1223,19 @@ func (s *StateDB) GetAncestorTimeSlot() []uint32 {
 }
 
 func (s *StateDB) SetAncestor(blockHeader types.BlockHeader, oldState *StateDB) {
-	ancestorSet := make(map[common.Hash]uint32, len(oldState.AncestorSet)+1)
+	// Use LookupAnchorMaxAge as the maximum ancestor window
+	maxAncestorSlots := uint32(types.LookupAnchorMaxAge)
+
+	cutoffSlot := uint32(0)
+	if blockHeader.Slot > maxAncestorSlots {
+		cutoffSlot = blockHeader.Slot - maxAncestorSlots
+	}
+
+	ancestorSet := make(map[common.Hash]uint32)
 	for k, v := range oldState.AncestorSet {
-		ancestorSet[k] = v
+		if v >= cutoffSlot {
+			ancestorSet[k] = v
+		}
 	}
 	ancestorSet[blockHeader.Hash()] = blockHeader.Slot
 	s.AncestorSet = ancestorSet

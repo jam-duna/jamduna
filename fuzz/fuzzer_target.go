@@ -16,6 +16,7 @@ import (
 	"github.com/jam-duna/jamduna/common"
 	"github.com/jam-duna/jamduna/pvm"
 	"github.com/jam-duna/jamduna/storage"
+
 	// "github.com/jam-duna/jamduna/refine"
 	"github.com/jam-duna/jamduna/statedb"
 	"github.com/jam-duna/jamduna/types"
@@ -28,23 +29,39 @@ type StateTransition struct {
 	PostState statedb.StateSnapshotRaw `json:"post_state"`
 }
 
-// Target represents the server-side implementation that the fuzzer connects to.
-type Target struct {
-	listener      net.Listener
-	socketPath    string
-	targetInfo    PeerInfo
-	store         *storage.StorageHub     // Storage backend for the state database.
-	stateDB       *statedb.StateDB            // This can be used to manage state transitions.
-	stateDBMap    map[common.Hash]common.Hash // [headererHash]posteriorStateRoot
-	pvmBackend    string                      // Backend to use for state transitions, e.g., "Interpreter" or "Compiler".
-	exportsLookup map[common.Hash]common.Hash // [workPackageHash or exportsRoot] -> segmentsHash
-	exportsData   map[common.Hash][][]byte    // [segmentsHash] -> exportedSegments
-	debugState    bool                        // Enable detailed state debugging output
-	dumpStf       bool                        // Dump state transition files for debugging
-	dumpLocation  string                      // Directory path for STF dump files
+// DefaultPruneDepth is the number of slots of state history to keep in memory.
+const DefaultPruneDepth = 64
+
+// PruneInterval is how often (in slots) to run the pruning process.
+const PruneInterval = 32
+
+type stateEntry struct {
+	stateRoot common.Hash
+	slot      uint32
 }
 
-// NewTarget creates a new target instance, armed with a specific test case.
+type exportEntry struct {
+	segmentsHash common.Hash
+	slot         uint32
+}
+
+type Target struct {
+	listener       net.Listener
+	socketPath     string
+	targetInfo     PeerInfo
+	store          *storage.StorageHub         // Storage backend for the state database.
+	stateDB        *statedb.StateDB            // This can be used to manage state transitions.
+	stateDBMap     map[common.Hash]stateEntry  // [headerHash] -> {stateRoot, slot} for fork detection cache
+	pvmBackend     string                      // Backend to use for state transitions, e.g., "Interpreter" or "Compiler".
+	exportsLookup  map[common.Hash]exportEntry // [workPackageHash or exportsRoot] -> {segmentsHash, slot}
+	exportsData    map[common.Hash][][]byte    // [segmentsHash] -> exportedSegments
+	debugState     bool                        // Enable detailed state debugging output
+	dumpStf        bool                        // Dump state transition files for debugging
+	dumpLocation   string                      // Directory path for STF dump files
+	lastPrunedSlot uint32                      // Last slot where pruning was performed
+	sessionID      string                      // Unique session ID for this socket connection (persists for lifetime of target)
+}
+
 func NewTarget(socketPath string, targetInfo PeerInfo, pvmBackend string, debugState bool, dumpStf bool, dumpLocation string) *Target {
 	levelDBPath := fmt.Sprintf("/tmp/target_%d", time.Now().Unix())
 	store, err := storage.NewStorageHub(levelDBPath, nil, nil, 0)
@@ -59,18 +76,22 @@ func NewTarget(socketPath string, targetInfo PeerInfo, pvmBackend string, debugS
 		fmt.Printf("Defaulting to Interpreter\n")
 	}
 
+	sessionID := fmt.Sprintf("%d", time.Now().UnixNano())
+
 	return &Target{
-		socketPath:    socketPath,
-		targetInfo:    targetInfo,
-		store:         store,
-		stateDB:       nil,
-		stateDBMap:    make(map[common.Hash]common.Hash),
-		pvmBackend:    pvmBackend,
-		exportsLookup: make(map[common.Hash]common.Hash),
-		exportsData:   make(map[common.Hash][][]byte),
-		debugState:    debugState,
-		dumpStf:       dumpStf,
-		dumpLocation:  dumpLocation,
+		socketPath:     socketPath,
+		targetInfo:     targetInfo,
+		store:          store,
+		stateDB:        nil,
+		stateDBMap:     make(map[common.Hash]stateEntry),
+		pvmBackend:     pvmBackend,
+		exportsLookup:  make(map[common.Hash]exportEntry),
+		exportsData:    make(map[common.Hash][][]byte),
+		debugState:     debugState,
+		dumpStf:        dumpStf,
+		dumpLocation:   dumpLocation,
+		lastPrunedSlot: 0,
+		sessionID:      sessionID,
 	}
 }
 
@@ -189,11 +210,19 @@ func (t *Target) onInitialize(req *Initialize) *Message {
 		}
 	}
 
-	// Reset the trie to avoid pollution from previous state
-	// This ensures the state root is computed purely from the provided KeyVals
 	t.store.ResetTrie()
-	t.stateDBMap = make(map[common.Hash]common.Hash)
 
+	if req.Header.Slot < t.lastPrunedSlot {
+		if t.debugState {
+			log.Printf("%s[INIT_RESET]%s Slot %d: Trie reset, lastPrunedSlot (was %d) -> 0 (new test detected), stateDBMap kept (%d entries)%s", common.ColorYellow, common.ColorReset, req.Header.Slot, t.lastPrunedSlot, len(t.stateDBMap), common.ColorReset)
+		}
+		t.lastPrunedSlot = 0
+	} else {
+		if t.debugState {
+			log.Printf("%s[INIT_RESET]%s Slot %d: Trie reset, lastPrunedSlot remains %d (continuing test), stateDBMap kept (%d entries)%s", common.ColorYellow, common.ColorReset, req.Header.Slot, t.lastPrunedSlot, len(t.stateDBMap), common.ColorReset)
+		}
+	}
+	// Each fuzzer run (socket connection) has a unique sessionID namespace
 	startTime := time.Now()
 	recoveredStateDB, err := statedb.NewStateDBFromStateKeyVals(t.store, &req.KeyVals)
 	recoveredStateDBStateRoot := recoveredStateDB.StateRoot
@@ -209,7 +238,10 @@ func (t *Target) onInitialize(req *Initialize) *Message {
 	log.Printf("%sState_Root: %v%s", common.ColorGray, recoveredStateDBStateRoot.Hex(), common.ColorReset)
 	log.Printf("%sHeaderHash: %v%s", common.ColorGray, headerHash.Hex(), common.ColorReset)
 
-	t.stateDBMap[headerHash] = recoveredStateDBStateRoot
+	t.stateDBMap[headerHash] = stateEntry{stateRoot: recoveredStateDBStateRoot, slot: req.Header.Slot}
+	if err := t.storeHeaderStateRoot(headerHash, recoveredStateDBStateRoot); err != nil {
+		log.Printf("%sWarning: failed to persist headerHash->stateRoot mapping: %v%s", common.ColorYellow, err, common.ColorReset)
+	}
 	log.Printf("%s[OUTGOING RSP]%s StateRoot", common.ColorGreen, common.ColorReset)
 	return &Message{StateRoot: &recoveredStateDBStateRoot}
 }
@@ -228,9 +260,9 @@ func (t *Target) onSetState(req *HeaderWithState) *Message {
 		//log.Printf("%sWarning: Target already has a state initialized. Overwriting with new state.%s", colorYellow, common.ColorReset)
 	}
 
-	// Reset the trie to avoid pollution from previous state
 	t.store.ResetTrie()
-	t.stateDBMap = make(map[common.Hash]common.Hash)
+	t.stateDBMap = make(map[common.Hash]stateEntry)
+	t.lastPrunedSlot = 0
 
 	startTime := time.Now()
 	recovered_statedb, err := statedb.NewStateDBFromStateKeyVals(t.store, &sky)
@@ -247,7 +279,10 @@ func (t *Target) onSetState(req *HeaderWithState) *Message {
 	log.Printf("%sState_Root: %v%s", common.ColorGray, recovered_statedb_stateRoot.Hex(), common.ColorReset)
 	log.Printf("%sHeaderHash: %v%s", common.ColorGray, headerHash.Hex(), common.ColorReset)
 
-	t.stateDBMap[headerHash] = recovered_statedb_stateRoot
+	t.stateDBMap[headerHash] = stateEntry{stateRoot: recovered_statedb_stateRoot, slot: header.Slot}
+	if err := t.storeHeaderStateRoot(headerHash, recovered_statedb_stateRoot); err != nil {
+		log.Printf("%sWarning: failed to persist headerHash->stateRoot mapping: %v%s", common.ColorYellow, err, common.ColorReset)
+	}
 	log.Printf("%s[OUTGOING RSP]%s StateRoot", common.ColorGreen, common.ColorReset)
 	return &Message{StateRoot: &recovered_statedb_stateRoot}
 }
@@ -268,7 +303,6 @@ func (t *Target) onImportBlock(req *types.Block) *Message {
 		}
 	}
 
-	// apply state transition using block and the current stateDB
 	if t.stateDB == nil {
 		log.Printf("%sError: Target has no state initialized. Please set the state first.%s", common.ColorRed, common.ColorReset)
 		return &Message{StateRoot: &common.Hash{}}
@@ -280,38 +314,39 @@ func (t *Target) onImportBlock(req *types.Block) *Message {
 	// Check if we need to fork from a different state
 	if req.Header.ParentStateRoot != preStateRoot {
 
-		// Look for the correct parent state in our stateDBMap
+		// Look for the correct parent state in our stateDBMap cache
 		var foundParentHeaderHash common.Hash
-		for headerHash, stateRoot := range t.stateDBMap {
-			if stateRoot == req.Header.ParentStateRoot {
+		for headerHash, entry := range t.stateDBMap {
+			if entry.stateRoot == req.Header.ParentStateRoot {
 				foundParentHeaderHash = headerHash
 				if t.debugState {
-					log.Printf("%s[FORK_DEBUG]%s Found parent state: HeaderHash=%s has StateRoot=%s%s", common.ColorMagenta, common.ColorReset, headerHash.Hex(), stateRoot.Hex(), common.ColorReset)
+					log.Printf("%s[FORK_DEBUG]%s Found parent state in cache: HeaderHash=%s has StateRoot=%s%s", common.ColorMagenta, common.ColorReset, headerHash.Hex(), entry.stateRoot.Hex(), common.ColorReset)
 				}
 				break
 			}
 		}
 
-		if foundParentHeaderHash != (common.Hash{}) {
-
-			// Create a copy of our current state and recover the parent state
-			forkState := preState.Copy()
-			if forkState == nil {
-				log.Printf("%s[FORK_DEBUG]%s ERROR: failed to copy current state for forking%s", common.ColorRed, common.ColorReset, common.ColorReset)
-			} else if err := forkState.InitTrieAndLoadJamState(req.Header.ParentStateRoot); err != nil {
-				log.Printf("%s[FORK_DEBUG]%s ERROR: unable to recover fork state: %v%s", common.ColorRed, common.ColorReset, err, common.ColorReset)
-			} else {
-				forkState.HeaderHash = foundParentHeaderHash
-				//forkState.StateRoot = req.Header.ParentStateRoot // Now set inside InitTrieAndLoadJamState
-				if t.debugState {
-					log.Printf("%s[FORK_DEBUG]%s Fork state prepared: HeaderHash=%s, StateRoot=%s%s", common.ColorMagenta, common.ColorReset, forkState.HeaderHash.Hex(), forkState.StateRoot.Hex(), common.ColorReset)
-				}
-				// Use the fork state instead of current state
-				preState = forkState
-				preStateRoot = forkState.StateRoot
-			}
+		// Create a copy of our current state and recover the parent state
+		forkState := preState.Copy()
+		if forkState == nil {
+			log.Printf("%s[FORK_DEBUG]%s ERROR: failed to copy current state for forking%s", common.ColorRed, common.ColorReset, common.ColorReset)
+		} else if err := forkState.InitTrieAndLoadJamState(req.Header.ParentStateRoot); err != nil {
+			// Fallback failed - state not in trie storage
+			log.Printf("%s[FORK_DEBUG]%s ERROR: unable to recover fork state: %v%s", common.ColorRed, common.ColorReset, err, common.ColorReset)
 		} else {
-			log.Printf("%s[FORK_DEBUG]%s ERROR: Could not find parent state with StateRoot=%s%s", common.ColorRed, common.ColorReset, req.Header.ParentStateRoot.Hex(), common.ColorReset)
+			// Successfully recovered from trie storage
+			if foundParentHeaderHash != (common.Hash{}) {
+				forkState.HeaderHash = foundParentHeaderHash
+			} else {
+				// State was pruned from cache but recovered from trie storage
+				log.Printf("%s[FORK_RECOVERY]%s Recovered pruned state from trie: %s%s", common.ColorYellow, common.ColorReset, req.Header.ParentStateRoot.Hex(), common.ColorReset)
+			}
+			if t.debugState {
+				log.Printf("%s[FORK_DEBUG]%s Fork state prepared: HeaderHash=%s, StateRoot=%s%s", common.ColorMagenta, common.ColorReset, forkState.HeaderHash.Hex(), forkState.StateRoot.Hex(), common.ColorReset)
+			}
+			// Use the fork state instead of current state
+			preState = forkState
+			preStateRoot = forkState.StateRoot
 		}
 	}
 
@@ -356,7 +391,13 @@ func (t *Target) onImportBlock(req *types.Block) *Message {
 	// Only update target state on successful import
 	postStateRoot := postState.StateRoot
 	t.SetStateDB(postState)
-	t.stateDBMap[headerHash] = postStateRoot
+	t.stateDBMap[headerHash] = stateEntry{stateRoot: postStateRoot, slot: req.Header.Slot}
+	if err := t.storeHeaderStateRoot(headerHash, postStateRoot); err != nil {
+		log.Printf("%sWarning: failed to persist headerHash->stateRoot mapping: %v%s", common.ColorYellow, err, common.ColorReset)
+	}
+
+	t.pruneOldStates(req.Header.Slot)
+
 	log.Printf("%s[OUTGOING RSP]%s StateRoot", common.ColorGreen, common.ColorReset)
 	return &Message{StateRoot: &postStateRoot}
 }
@@ -367,15 +408,25 @@ func (t *Target) onGetState(req *common.Hash) *Message {
 	log.Printf("%s[INCOMING REQ]%s GetState", common.ColorBlue, common.ColorReset)
 	log.Printf("%sReceived GetState request headerHash: %s%s", common.ColorGray, headerHash.Hex(), common.ColorReset)
 
-	if t.stateDBMap[headerHash] == (common.Hash{}) {
-		log.Printf("%s[GET_STATE_DEBUG]%s Error: No state found for headerHash: %s%s", common.ColorRed, common.ColorReset, headerHash.Hex(), common.ColorReset)
-		return &Message{State: &statedb.StateKeyVals{}}
+	// First check the cache for fast path
+	var stateRoot common.Hash
+	entry, exists := t.stateDBMap[headerHash]
+	if exists && entry.stateRoot != (common.Hash{}) {
+		stateRoot = entry.stateRoot
+	} else {
+		// State was pruned from cache - try LevelDB persistent mapping
+		persistedRoot, found, err := t.getHeaderStateRoot(headerHash)
+		if err != nil {
+			log.Printf("%s[GET_STATE_DEBUG]%s Error reading persistent mapping for headerHash %s: %v%s", common.ColorRed, common.ColorReset, headerHash.Hex(), err, common.ColorReset)
+			return &Message{State: &statedb.StateKeyVals{}}
+		}
+		if !found || persistedRoot == (common.Hash{}) {
+			log.Printf("%s[GET_STATE_DEBUG]%s State not found for headerHash: %s (neither in cache nor LevelDB)%s", common.ColorRed, common.ColorReset, headerHash.Hex(), common.ColorReset)
+			return &Message{State: &statedb.StateKeyVals{}}
+		}
+		stateRoot = persistedRoot
+		log.Printf("%s[GET_STATE_DEBUG]%s State pruned from cache but recovered from LevelDB: headerHash=%s, stateRoot=%s%s", common.ColorYellow, common.ColorReset, headerHash.Hex(), stateRoot.Hex(), common.ColorReset)
 	}
-
-	// Fetch back the state root from the map
-	stateRoot := t.stateDBMap[headerHash]
-	//log.Printf("%s[GET_STATE_DEBUG]%s Recovering state for headerHash: %s with stateRoot: %s%s", common.ColorGray, common.ColorReset, headerHash.Hex(), stateRoot.Hex(), common.ColorReset)
-	//log.Printf("%s[GET_STATE_DEBUG]%s Current stateDB: HeaderHash=%s, StateRoot=%s%s", common.ColorGray, common.ColorReset, t.stateDB.HeaderHash.Hex(), t.stateDB.StateRoot.Hex(), common.ColorReset)
 
 	recoveredStateDB := t.stateDB.Copy()
 	if recoveredStateDB == nil {
@@ -438,7 +489,7 @@ func (t *Target) onGetState(req *common.Hash) *Message {
 			)
 
 			if refineErr == nil && len(exportedSegments) > 0 {
-				t.storeExportedSegments(workPackageHash, workReport.AvailabilitySpec.ExportedSegmentRoot, exportedSegments)
+				t.storeExportedSegments(workPackageHash, workReport.AvailabilitySpec.ExportedSegmentRoot, exportedSegments, t.stateDB.GetTimeslot())
 			}
 
 			log.Printf("%sBundle execution completed (took %.3fms)%s", common.ColorGray, float64(executionDuration.Nanoseconds())/1e6, common.ColorReset)
@@ -466,15 +517,15 @@ func (t *Target) onGetExports(req *common.Hash) *Message {
 }
 
 // storeExportedSegments stores exported segments with indirection to avoid data duplication
-func (t *Target) storeExportedSegments(workPackageHash, exportsRoot common.Hash, exportedSegments [][]byte) {
+func (t *Target) storeExportedSegments(workPackageHash, exportsRoot common.Hash, exportedSegments [][]byte, slot uint32) {
 	segmentsHash := common.BytesToHash(append([]byte("segments"), workPackageHash.Bytes()...))
 
 	t.exportsData[segmentsHash] = exportedSegments
 
-	t.exportsLookup[workPackageHash] = segmentsHash
+	t.exportsLookup[workPackageHash] = exportEntry{segmentsHash: segmentsHash, slot: slot}
 
 	if exportsRoot != (common.Hash{}) {
-		t.exportsLookup[exportsRoot] = segmentsHash
+		t.exportsLookup[exportsRoot] = exportEntry{segmentsHash: segmentsHash, slot: slot}
 	}
 
 	log.Printf("%sStored %d exported segments with hash %s for work package %s%s",
@@ -485,21 +536,115 @@ func (t *Target) storeExportedSegments(workPackageHash, exportsRoot common.Hash,
 func (t *Target) getExportedSegments(requestHash common.Hash) ([][]byte, bool) {
 	// Look up the segments hash by the requested hash
 	// This could be either a work package hash or an exported segment root
-	segmentsHash, found := t.exportsLookup[requestHash]
+	entry, found := t.exportsLookup[requestHash]
 	if !found {
 		log.Printf("%sNo exported segments lookup found for hash %s%s", common.ColorRed, requestHash.Hex(), common.ColorReset)
 		return nil, false
 	}
 
-	exportedSegments, dataFound := t.exportsData[segmentsHash]
+	exportedSegments, dataFound := t.exportsData[entry.segmentsHash]
 	if !dataFound {
-		log.Printf("%sNo exported segments data found for segments hash %s%s", common.ColorRed, segmentsHash.Hex(), common.ColorReset)
+		log.Printf("%sNo exported segments data found for segments hash %s%s", common.ColorRed, entry.segmentsHash.Hex(), common.ColorReset)
 		return nil, false
 	}
 
 	log.Printf("%sFound %d exported segments via segments hash %s for request hash %s%s",
-		common.ColorGray, len(exportedSegments), segmentsHash.Hex(), requestHash.Hex(), common.ColorReset)
+		common.ColorGray, len(exportedSegments), entry.segmentsHash.Hex(), requestHash.Hex(), common.ColorReset)
 	return exportedSegments, true
+}
+
+func (t *Target) pruneOldStates(currentSlot uint32) {
+	if currentSlot < t.lastPrunedSlot+PruneInterval {
+		if t.debugState {
+			log.Printf("%s[PRUNE_SKIP]%s Slot %d: too soon (lastPruned=%d, interval=%d, next=%d)%s", common.ColorGray, common.ColorReset, currentSlot, t.lastPrunedSlot, PruneInterval, t.lastPrunedSlot+PruneInterval, common.ColorReset)
+		}
+		return
+	}
+
+	cutoffSlot := uint32(0)
+	if currentSlot > DefaultPruneDepth {
+		cutoffSlot = currentSlot - DefaultPruneDepth
+	}
+
+	if t.debugState {
+		log.Printf("%s[PRUNE_START]%s Slot %d: cutoffSlot=%d, stateCount=%d, lastPruned=%d%s", common.ColorYellow, common.ColorReset, currentSlot, cutoffSlot, len(t.stateDBMap), t.lastPrunedSlot, common.ColorReset)
+	}
+	t.lastPrunedSlot = currentSlot
+
+	statesBeforePrune := len(t.stateDBMap)
+	exportsBeforePrune := len(t.exportsLookup)
+
+	for headerHash, entry := range t.stateDBMap {
+		if entry.slot < cutoffSlot {
+			delete(t.stateDBMap, headerHash)
+			if t.debugState {
+				log.Printf("%s[PRUNE]%s Removed state for HeaderHash=%s at slot %d (cutoff=%d)%s", common.ColorYellow, common.ColorReset, headerHash.Hex(), entry.slot, cutoffSlot, common.ColorReset)
+			}
+		}
+	}
+
+	oldLookupEntries := make([]common.Hash, 0)
+	for requestHash, entry := range t.exportsLookup {
+		if entry.slot < cutoffSlot {
+			oldLookupEntries = append(oldLookupEntries, requestHash)
+			if t.debugState {
+				log.Printf("%s[PRUNE]%s Marking export lookup for removal: RequestHash=%s at slot %d (cutoff=%d)%s", common.ColorYellow, common.ColorReset, requestHash.Hex(), entry.slot, cutoffSlot, common.ColorReset)
+			}
+		}
+	}
+
+	for _, requestHash := range oldLookupEntries {
+		delete(t.exportsLookup, requestHash)
+	}
+
+	referencedHashes := make(map[common.Hash]bool)
+	for _, entry := range t.exportsLookup {
+		referencedHashes[entry.segmentsHash] = true
+	}
+	for segmentsHash := range t.exportsData {
+		if !referencedHashes[segmentsHash] {
+			delete(t.exportsData, segmentsHash)
+			if t.debugState {
+				log.Printf("%s[PRUNE]%s Removed unreferenced export data: SegmentsHash=%s%s", common.ColorYellow, common.ColorReset, segmentsHash.Hex(), common.ColorReset)
+			}
+		}
+	}
+
+	statesAfterPrune := len(t.stateDBMap)
+	exportsAfterPrune := len(t.exportsLookup)
+
+	if t.debugState {
+		if statesBeforePrune > statesAfterPrune || exportsBeforePrune > exportsAfterPrune {
+			log.Printf("%s[PRUNE]%s Slot %d: Pruned %d states (%d -> %d), %d exports (%d -> %d)%s", common.ColorYellow, common.ColorReset, currentSlot, statesBeforePrune-statesAfterPrune, statesBeforePrune, statesAfterPrune, exportsBeforePrune-exportsAfterPrune, exportsBeforePrune, exportsAfterPrune, common.ColorReset)
+		} else {
+			log.Printf("%s[PRUNE]%s Slot %d: Nothing to prune (cutoff=%d, all %d states are >= cutoff)%s", common.ColorYellow, common.ColorReset, currentSlot, cutoffSlot, statesBeforePrune, common.ColorReset)
+		}
+	}
+}
+
+func (t *Target) headerStateRootKey(headerHash common.Hash) []byte {
+	prefix := []byte("hh2s_")
+	sessionPrefix := append(prefix, []byte(t.sessionID+"_")...)
+	return append(sessionPrefix, headerHash.Bytes()...)
+}
+
+func (t *Target) storeHeaderStateRoot(headerHash, stateRoot common.Hash) error {
+	key := t.headerStateRootKey(headerHash)
+	return t.store.Persist.Put(key, stateRoot.Bytes())
+}
+
+func (t *Target) getHeaderStateRoot(headerHash common.Hash) (common.Hash, bool, error) {
+	key := t.headerStateRootKey(headerHash)
+	value, found, err := t.store.Persist.Get(key)
+	if err != nil || !found {
+		return common.Hash{}, false, err
+	}
+	if len(value) != 32 {
+		return common.Hash{}, false, fmt.Errorf("invalid stateRoot length: %d", len(value))
+	}
+	var stateRoot common.Hash
+	copy(stateRoot[:], value)
+	return stateRoot, true, nil
 }
 
 func sendMessage(conn net.Conn, msg *Message) error {
@@ -528,7 +673,6 @@ func (t *Target) dumpStateTransitionFiles(preState *statedb.StateDB, block *type
 	headerHash := block.Header.Hash().Hex()
 	slot := block.Header.Slot
 
-	// Ensure the dump directory exists
 	if err := os.MkdirAll(t.dumpLocation, 0755); err != nil {
 		log.Printf("%s[STF_DUMP_ERR] Failed to create dump directory %s: %v%s", common.ColorRed, t.dumpLocation, err, common.ColorReset)
 		return
@@ -536,12 +680,10 @@ func (t *Target) dumpStateTransitionFiles(preState *statedb.StateDB, block *type
 
 	filename := fmt.Sprintf("%s/stf_dump_slot%d_%s_%s.json", t.dumpLocation, slot, headerHash, status)
 
-	// Create StateTransition struct
 	transition := StateTransition{
 		Block: *block,
 	}
 
-	// Convert preState to StateSnapshotRaw if available
 	if preState != nil {
 		transition.PreState = statedb.StateSnapshotRaw{
 			StateRoot: preState.StateRoot,
@@ -549,7 +691,6 @@ func (t *Target) dumpStateTransitionFiles(preState *statedb.StateDB, block *type
 		}
 	}
 
-	// Convert postState to StateSnapshotRaw if available
 	if postState != nil {
 		transition.PostState = statedb.StateSnapshotRaw{
 			StateRoot: postState.StateRoot,
@@ -557,14 +698,12 @@ func (t *Target) dumpStateTransitionFiles(preState *statedb.StateDB, block *type
 		}
 	}
 
-	// Marshal the StateTransition struct
 	data, jsonErr := json.MarshalIndent(transition, "", "  ")
 	if jsonErr != nil {
 		log.Printf("%s[STF_DUMP_ERR] Failed to marshal STF data: %v%s", common.ColorRed, jsonErr, common.ColorReset)
 		return
 	}
 
-	// Add error information if present (append to file or separate handling)
 	if err != nil {
 		errorInfo := map[string]interface{}{
 			"error":  err.Error(),
