@@ -376,7 +376,7 @@ func (s *StateDB) ParallelizedAccumulate(
 		par = 1
 	}
 
-	const isParallel = false
+	const isParallel = true
 	var acc_results []accRes
 
 	if isParallel {
