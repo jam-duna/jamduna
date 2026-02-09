@@ -1629,8 +1629,9 @@ func (vm *VM) hostSolicit() {
 
 	// Helper to check if we have capacity to add a new lookup + preimage
 	ensureCapacity := func() bool {
-		// SOLICIT adds 2 items (lookup + preimage) and z bytes.
-		threshold := xs.ComputeThresholdDelta(2, int64(z))
+		// SOLICIT adds 2 items (lookup + preimage) and (81+z) bytes per Graypaper §9.4
+		deltaBytes := int64(AccountLookupConst + uint64(blobLen))
+		threshold := xs.ComputeThresholdDelta(2, deltaBytes)
 		if threshold == ^uint64(0) {
 			vm.DebugHostFunction(SOLICIT, "RESULT=FULL (threshold overflow) h=%v z=%d", accountLookupHash, z)
 			vm.WriteRegister(7, FULL)
@@ -1656,8 +1657,8 @@ func (vm *VM) hostSolicit() {
 		}
 		xs.WriteLookup(accountLookupHash, blobLen, []uint32{}, lookupSource)
 		xs.AdjustNumStorageItems(2)
-		xs.AdjustStorageSize(int64(AccountLookupConst + uint64(z)))
-		vm.DebugHostFunction(SOLICIT, "RESULT=OK (created empty lookup) h=%v z=%d source=%s", accountLookupHash, z, lookupSource)
+		xs.AdjustStorageSize(int64(AccountLookupConst + uint64(blobLen)))
+		vm.DebugHostFunction(SOLICIT, "RESULT=OK (created empty lookup) h=%v z=%d source=%s", accountLookupHash, blobLen, lookupSource)
 		vm.WriteRegister(7, OK)
 		vm.SetHostResultCode(OK)
 		return
