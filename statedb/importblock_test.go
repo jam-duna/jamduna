@@ -715,13 +715,11 @@ func TestFuzzTraceSequential(t *testing.T) {
 			} else {
 				// Test specific cases
 				testCases := []string{
-					// "1768816138", // Conformance test failure from w3f/jam-conformance JamZig_m1
-					// "1768864701", //from javajam eject ..to check
-					// "1768945074", //from javajam eject to check
-					// "1769427369_3089", //jampy --validator problem
-					// "1769433291_7245", //jampy --validator problem
-					// "1769433291_8332", //jampy --validator problem
-					"1769631850_5575", // jampy --validator problem
+
+					"1769202382", //javajam_m1
+					// "1768945074", //javajam_m1
+					//"1768864701", //javajam_m1
+					// "1769596659_1961", //jamforge_m1
 				}
 
 				for _, id := range testCases {
@@ -805,6 +803,10 @@ func runSequentialFuzzTrace(t *testing.T, sourcePath, targetVersion, testCaseID 
 		stf, err := parseSTFFile(stepFile, string(stepContent))
 		if err != nil {
 			t.Fatalf("failed to parse step %d: %v", stepNum+1, err)
+		}
+		if stf.PostState.StateRoot == (common.Hash{}) {
+			// DO NOT t.Skip! Manual verification required
+			//t.Skipf("MANUAL REVIEW: Step %d's PostState has empty StateRoot, skipping automated check", stepNum+1)")
 		}
 
 		// Check if this step should succeed (pre != post means valid block)

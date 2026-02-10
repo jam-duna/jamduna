@@ -591,6 +591,9 @@ func (s *ServiceAccount) AdjustStorageSize(delta int64) {
 // we don't keep re-merging other accounts which may be stale overwriting newer mutations (e.g. storage counters).
 func (s *ServiceAccount) ResetDirtyFlags() {
 	s.Dirty = false
+	// NewAccount should only be true within the execution round that created it.
+	// Carrying this flag into later rounds makes checkpointing mark unrelated stale snapshots as dirty and can overwrite newer merged balances.
+	s.NewAccount = false
 	s.NumStorageItemsDirty = false
 	s.StorageSizeDirty = false
 	for _, storage := range s.Storage {
@@ -753,6 +756,8 @@ func (s *ServiceAccount) MergeUpdates(updates *ServiceAccount) {
 	if updates.RecentAccumulation > s.RecentAccumulation {
 		s.RecentAccumulation = updates.RecentAccumulation
 	}
+	// once deleted, it cannot be cleared by later dirty/new updates from other accumulation branches.
+	s.DeletedAccount = s.DeletedAccount || updates.DeletedAccount
 }
 
 // (9.8) [Gratis] max(0, BS + BI ⋅ ai + BL ⋅ ao − af )

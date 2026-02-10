@@ -369,16 +369,27 @@ func HandleDiffs(diffs map[string]DiffState) {
 		fmt.Printf("\033[34mState Key: %s (%s)\033[0m\n", stateType, key[:64])
 
 		// Special handling for c7 (validator keys) - parse and display validators
-		if stateType == "c7" {
+		if strings.EqualFold(stateType, "c7") {
 			parseAndLogValidators("PreState", val.Prestate)
 			parseAndLogValidators("Expected", val.ExpectedPostState)
 			parseAndLogValidators("Actual", val.ActualPostState)
 		} else {
-			fmt.Printf("%-10s | PreState : 0x%x\n", stateType, val.Prestate)
+			printHexValueLine(stateType, "PreState : ", val.Prestate, maxHexLineDisplayBytes)
 			printHexDiff(stateType, val.ExpectedPostState, val.ActualPostState)
 		}
 
 		if stateType != "unknown" {
+			if isJamStateC1ToC15(stateType) {
+				fmt.Printf("------ %s JSON SKIPPED (C1~C15) ------\n", stateType)
+				fmt.Println(strings.Repeat("=", 40))
+				continue
+			}
+			if len(val.ExpectedPostState) > maxHexDiffDisplayBytes || len(val.ActualPostState) > maxHexDiffDisplayBytes {
+				fmt.Printf("------ %s JSON SKIPPED (large payload: exp=%dB act=%dB) ------\n", stateType, len(val.ExpectedPostState), len(val.ActualPostState))
+				fmt.Println(strings.Repeat("=", 40))
+				continue
+			}
+
 			expJSON, _ := StateDecodeToJson(val.ExpectedPostState, stateType)
 			actJSON, _ := StateDecodeToJson(val.ActualPostState, stateType)
 

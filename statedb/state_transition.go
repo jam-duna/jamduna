@@ -19,7 +19,40 @@ const (
 	colorReset = "\033[0m"
 	colorRed   = "\033[31m"
 	colorGreen = "\033[32m"
+
+	maxHexDiffDisplayBytes = 1024
+	maxHexLineDisplayBytes = 256
 )
+
+func truncatedHex(data []byte, maxDisplay int) string {
+	if maxDisplay <= 0 || len(data) <= maxDisplay {
+		return fmt.Sprintf("0x%x", data)
+	}
+	return fmt.Sprintf("0x%x...(truncated %d/%d bytes)", data[:maxDisplay], maxDisplay, len(data))
+}
+
+func printHexValueLine(label, prefix string, data []byte, maxDisplay int) {
+	fmt.Printf("%-10s | %s%s\n", label, prefix, truncatedHex(data, maxDisplay))
+}
+
+func parseStateTypeID(stateType string) (int, bool) {
+	if len(stateType) < 2 {
+		return 0, false
+	}
+	if stateType[0] != 'C' && stateType[0] != 'c' {
+		return 0, false
+	}
+	n, err := strconv.Atoi(stateType[1:])
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+func isJamStateC1ToC15(stateType string) bool {
+	n, ok := parseStateTypeID(stateType)
+	return ok && n >= 1 && n <= 15
+}
 
 func InitStorage(testDir string) (*storage.StorageHub, error) {
 	return initStorage(testDir)
@@ -44,19 +77,15 @@ func initStorage(testDir string) (*storage.StorageHub, error) {
 // printHexDiff prints two byte slices as hex, highlighting mismatched bytes in red.
 // If data exceeds 1KB, truncates output with "..."
 func printHexDiff(label string, exp, act []byte) {
-
-	var maxDisplay = 1024 // 1KB limit
-	if label == "C4" {
-		maxDisplay = 999999999999
-	}
+	maxDisplay := maxHexDiffDisplayBytes
 	// Check for missing keys
 	if len(exp) == 0 && len(act) > 0 {
 		fmt.Printf("%-10s | Expected: \033[33m<MISSING IN EXPECTED>\033[0m\n", label)
-		fmt.Printf("%-10s | Actual:   0x%x\n", label, act)
+		printHexValueLine(label, "Actual:   ", act, maxDisplay)
 		return
 	}
 	if len(act) == 0 && len(exp) > 0 {
-		fmt.Printf("%-10s | Expected: 0x%x\n", label, exp)
+		printHexValueLine(label, "Expected: ", exp, maxDisplay)
 		fmt.Printf("%-10s | Actual:   \033[33m<MISSING IN ACTUAL>\033[0m\n", label)
 		return
 	}
@@ -91,7 +120,7 @@ func printHexDiff(label string, exp, act []byte) {
 		}
 
 		if len(a) > maxDisplay || len(b) > maxDisplay {
-			fmt.Print("...")
+			fmt.Printf("...(truncated to %d bytes)", maxDisplay)
 		}
 		fmt.Println()
 	}
