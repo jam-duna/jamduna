@@ -142,8 +142,8 @@ func (u *PartialState) Clone() *PartialState {
 		UpcomingValidators: make([]Validator, len(u.UpcomingValidators)),
 		// Copying by value works here
 		QueueWorkReport: u.QueueWorkReport,
-		// Shallow copy; AlwaysAccServiceID handled below
-		PrivilegedState: u.PrivilegedState,
+		// Deep copy avoids sharing map fields (AlwaysAccServiceID) across clones.
+		PrivilegedState: u.PrivilegedState.Copy(),
 
 		UpcomingDirty:   u.UpcomingDirty,
 		QueueDirty:      u.QueueDirty,
@@ -154,11 +154,6 @@ func (u *PartialState) Clone() *PartialState {
 	copy(v.UpcomingValidators, u.UpcomingValidators)
 
 	v.QueueWorkReport = u.QueueWorkReport
-
-	// Copy AlwaysAccServiceID properly
-	for k, val := range u.PrivilegedState.AlwaysAccServiceID {
-		v.PrivilegedState.AlwaysAccServiceID[k] = val
-	}
 
 	// Deep copy ServiceAccounts (ServiceAccount map) -- we do need cloning here because of X vs Y
 	for s, sa := range u.ServiceAccounts {

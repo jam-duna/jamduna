@@ -349,8 +349,6 @@ func (s *StateDB) ParallelizedAccumulate(
 	}
 	for _, t := range transfersIn {
 		serviceMap[t.ReceiverIndex] = struct{}{}
-		// Transfer balance credits are applied in SingleAccumulate
-		// so they're applied to the worker's XContext and persisted during merge
 	}
 	services := make([]uint32, 0, len(serviceMap))
 	for service := range serviceMap {
@@ -376,26 +374,12 @@ func (s *StateDB) ParallelizedAccumulate(
 		par = 1
 	}
 
+	baseState := o.Clone()
+
 	const isParallel = true
 	var acc_results []accRes
 
 	if isParallel {
-		// Pre-apply all incoming transfer credits to o BEFORE parallel execution
-		// This ensures all parallel workers see consistent balances
-		for _, t := range transfersIn {
-			if sa, ok := o.GetService(t.ReceiverIndex); ok {
-				sa.ALLOW_MUTABLE()
-				sa.IncBalance(t.Amount)
-				sa.Dirty = true
-			} else if sa, ok, err := s.GetService(t.ReceiverIndex); err == nil && ok {
-				// Service not in o yet, add it with the credit applied
-				cloned := sa.Clone()
-				cloned.ALLOW_MUTABLE()
-				cloned.IncBalance(t.Amount)
-				cloned.Dirty = true
-				o.ServiceAccounts[t.ReceiverIndex] = cloned
-			}
-		}
 		jobCh := make(chan uint32, len(services))
 		resCh := make(chan accRes, len(services))
 		var wg sync.WaitGroup
@@ -410,7 +394,7 @@ func (s *StateDB) ParallelizedAccumulate(
 				if logDir != "" {
 					svcLogDir = filepath.Join(logDir, fmt.Sprintf("%d", service))
 				}
-				out, gas, XY, exceptional := s.SingleAccumulate(o.Clone(), transfersIn, workReports, freeAccumulation, service, pvmBackend, svcLogDir, true)
+				out, gas, XY, exceptional := s.SingleAccumulate(baseState.Clone(), transfersIn, workReports, freeAccumulation, service, pvmBackend, svcLogDir, false)
 				benchRec.Add("SingleAccumulate", time.Since(t0))
 
 				if XY == nil {
@@ -461,7 +445,7 @@ func (s *StateDB) ParallelizedAccumulate(
 			if logDir != "" {
 				svcLogDir = filepath.Join(logDir, fmt.Sprintf("%d", service))
 			}
-			out, gas, XY, exceptional := s.SingleAccumulate(o, transfersIn, workReports, freeAccumulation, service, pvmBackend, svcLogDir, false)
+			out, gas, XY, exceptional := s.SingleAccumulate(baseState.Clone(), transfersIn, workReports, freeAccumulation, service, pvmBackend, svcLogDir, false)
 			benchRec.Add("SingleAccumulate", time.Since(t0))
 
 			if XY == nil {
@@ -612,12 +596,27 @@ func (s *StateDB) ParallelizedAccumulate(
 
 	//12.21
 	tmpProvide := make(map[uint32][]byte)
-	for _, xContext := range accumulated_partial {
+	accumulatedServices := make([]uint32, 0, len(accumulated_partial))
+	for serviceID := range accumulated_partial {
+		accumulatedServices = append(accumulatedServices, serviceID)
+	}
+	sort.Slice(accumulatedServices, func(i, j int) bool { return accumulatedServices[i] < accumulatedServices[j] })
+	for _, serviceID := range accumulatedServices {
+		xContext := accumulated_partial[serviceID]
+		if xContext == nil {
+			continue
+		}
 		for _, provide := range xContext.Provided {
 			tmpProvide[provide.ServiceIndex] = provide.P_data
 		}
 	}
-	for toService, preImageBytes := range tmpProvide {
+	providedServices := make([]uint32, 0, len(tmpProvide))
+	for toService := range tmpProvide {
+		providedServices = append(providedServices, toService)
+	}
+	sort.Slice(providedServices, func(i, j int) bool { return providedServices[i] < providedServices[j] })
+	for _, toService := range providedServices {
+		preImageBytes := tmpProvide[toService]
 		service, ok := o.ServiceAccounts[toService]
 		if !ok {
 			continue
@@ -820,8 +819,10 @@ func (sd *StateDB) SingleAccumulate(o *types.PartialState, transfersIn []types.D
 
 	// Apply transfer balance credits BEFORE creating XContext
 	// This ensures the balance increment is in the initial account state
-	// Skip if credits were pre-applied (parallel mode)
+	// Skip if credits were pre-applied (parallel mode).
+	// When not pre-applied, mutate a local clone so input state `o` remains immutable.
 	if len(selectedTransfers) > 0 && !creditsPreApplied {
+		serviceAccount = serviceAccount.Clone()
 		serviceAccount.ALLOW_MUTABLE()
 		for _, t := range selectedTransfers {
 			serviceAccount.IncBalance(t.Amount)
