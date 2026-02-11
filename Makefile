@@ -46,15 +46,11 @@ GO_LDFLAGS := -s -w \
 
 ifeq ($(UNAME_S),Linux)
   ifeq ($(UNAME_M),x86_64)
-    ARCH := linux-amd64
-  else ifeq ($(UNAME_M),aarch64)
-    ARCH := linux-arm64
+    ARCH := linux_amd64
   endif
 else ifeq ($(UNAME_S),Darwin)
-  ifeq ($(UNAME_M),x86_64)
-    ARCH := mac-amd64
-  else ifeq ($(UNAME_M),arm64)
-    ARCH := mac-arm64
+  ifeq ($(UNAME_M),arm64)
+    ARCH := mac_arm64
   endif
 endif
 
@@ -266,10 +262,10 @@ native_static_jam_linux_amd64:
 	@echo "--> Creating temporary symlink for libunicorn..."
 	@ln -s ${PWD}/ffi/libunicorn.linux_amd64.a ffi/libunicorn.a
 	-@$(call build_with_status,native_static_jam_linux_amd64,\
-		GOOS=linux GOARCH=amd64 CC=musl-gcc CGO_ENABLED=1 \
+		CGO_LDFLAGS="" GOOS=linux GOARCH=amd64 CC=musl-gcc CGO_ENABLED=1 \
 		go build -tags "cgo" \
 		-ldflags "$(GO_LDFLAGS) -extldflags '-static'" \
-		-o $(OUTPUT_DIR)/linux-amd64/$(BINARY) . && strip $(OUTPUT_DIR)/linux-amd64/jamduna 2>/dev/null)
+		-o $(OUTPUT_DIR)/linux_amd64/$(BINARY) . && strip $(OUTPUT_DIR)/linux_amd64/jamduna 2>/dev/null)
 	@rm ffi/libunicorn.a
 
 static_jam_linux_amd64:
@@ -279,30 +275,10 @@ static_jam_linux_amd64:
 	@# The '-' at the beginning of the next line tells 'make' to continue
 	@# to the cleanup step even if the build command fails.
 	-@$(call build_with_status,static_jam_linux_amd64,\
-	GOOS=linux GOARCH=amd64 CC=x86_64-linux-musl-gcc CGO_ENABLED=1 \
+	CGO_LDFLAGS="" GOOS=linux GOARCH=amd64 CC=x86_64-linux-musl-gcc CGO_ENABLED=1 \
 	go build -tags "cgo" \
 	-ldflags "$(GO_LDFLAGS) -extldflags '-static'" \
-	-o $(OUTPUT_DIR)/linux-amd64/$(BINARY) . && strip $(OUTPUT_DIR)/linux-amd64/jamduna 2>/dev/null)
-	@echo "--> Cleaning up temporary symlink..."
-	@rm ffi/libunicorn.a
-
-static_jam_linux_arm64:
-	@echo "Building JamDuna binary for Linux (aarch64)..."
-	$(call build_with_status,static_jam_linux_arm64,\
-	GOOS=linux GOARCH=arm64 CC=aarch64-linux-musl-gcc CGO_ENABLED=1 \
-	go build -tags "cgo" \
-	-ldflags "$(GO_LDFLAGS) -extldflags '-static'" \
-	-o $(OUTPUT_DIR)/linux-arm64/$(BINARY) . && strip $(OUTPUT_DIR)/linux-arm64/jamduna 2>/dev/null)
-
-static_jam_darwin_amd64:
-	@echo "Building JamDuna binary for macOS (x86_64)..."
-	@echo "--> Creating temporary symlink for libunicorn..."
-	@ln -s $(CURDIR)/ffi/libunicorn.mac.a ffi/libunicorn.a
-	-@$(call build_with_status,static_jam_darwin_amd64,\
-	GOOS=darwin GOARCH=amd64 CC=clang CGO_ENABLED=1 \
-	go build -tags "cgo" \
-	-ldflags "$(GO_LDFLAGS)" \
-	-o $(OUTPUT_DIR)/mac-amd64/$(BINARY) . && strip -x $(OUTPUT_DIR)/mac-amd64/jamduna)
+	-o $(OUTPUT_DIR)/linux_amd64/$(BINARY) . && strip $(OUTPUT_DIR)/linux_amd64/jamduna 2>/dev/null)
 	@echo "--> Cleaning up temporary symlink..."
 	@rm ffi/libunicorn.a
 
@@ -314,7 +290,7 @@ static_jam_darwin_arm64:
 	CGO_ENABLED=1 CC=clang \
 	go build -tags "cgo" \
 	-ldflags "$(GO_LDFLAGS)" \
-	-o $(OUTPUT_DIR)/mac-arm64/$(BINARY) . && strip -x $(OUTPUT_DIR)/mac-arm64/jamduna)
+	-o $(OUTPUT_DIR)/mac_arm64/$(BINARY) . && strip -x $(OUTPUT_DIR)/mac_arm64/jamduna)
 	@echo "--> Cleaning up temporary symlink..."
 	@rm ffi/libunicorn.a
 
@@ -324,26 +300,11 @@ static_jam_all:
 	# Always build Linux x86_64
 	@$(MAKE) static_jam_linux_amd64
 
-	# Build Linux ARM64 only if compiler exists or on ARM host
-	#@if command -v aarch64-linux-musl-gcc >/dev/null 2>&1; then \
-	#  $(MAKE) static_jam_linux_arm64; \
-	#else \
-	#  echo "⚠ Skipping Linux ARM64 (no aarch64-linux-musl-gcc)"; \
-	#fi
-
-	# Build macOS binaries only on macOS
+	# Build macOS ARM64 only on macOS
 	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-	  $(MAKE) static_jam_darwin_amd64; \
 	  $(MAKE) static_jam_darwin_arm64; \
 	else \
 	  echo "⚠ Skipping macOS targets (not on Darwin)"; \
-	fi
-
-	# Build Windows AMD64 if mingw compiler exists
-	@if command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then \
-	  echo "⚠ Skipping Windows AMD64 (no x86_64-w64-mingw32-gcc) for now"; \
-	else \
-	  echo "⚠ Skipping Windows AMD64 (no x86_64-w64-mingw32-gcc)"; \
 	fi
 
 tiny: jam reset_remote_nodes
@@ -587,7 +548,7 @@ jamx_stop:
 
 # ----------------------------------------
 # Release: build all binaries and package
-PLATFORMS := linux-amd64 linux-arm64 mac-amd64 mac-arm64
+PLATFORMS := linux_amd64 mac_arm64
 BIN_DIR    := bin
 RELEASE_DIR:= release
 
