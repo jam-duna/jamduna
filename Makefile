@@ -151,18 +151,18 @@ spin_localclient: jam  jam_clean spin_6
 spin_6:
 	@rm -rf ${HOME}/.jamduna/jam-*
 	@for i in 0 1 2 3 4 5; do \
-		$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator $$i  --rpc-port=$$(($(RPC_BASE_PORT) + $$i)) --chain ${CHAINSPEC} --pvm-backend $(PVM_BACKEND)  >logs/jamduna-$$i.log 2>&1 & \
+		$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator $$i  --rpc-port=$$(($(RPC_BASE_PORT) + $$i)) --chain ${CHAINSPEC} --pvm-backend $(PVM_BACKEND) --telemetry localhost:$(TELEMETRY_PORT)  >logs/jamduna-$$i.log 2>&1 & \
 	done
 
 spin_5:
 	@rm -rf ${HOME}/.jamduna/jam-*
 	@for i in 1 2 3 4 5; do \
-		$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator $$i  --rpc-port=$$(($(RPC_BASE_PORT) + $$i)) --chain ${CHAINSPEC} --pvm-backend $(PVM_BACKEND)  >logs/jamduna-$$i.log 2>&1 & \
+		$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --dev-validator $$i  --rpc-port=$$(($(RPC_BASE_PORT) + $$i)) --chain ${CHAINSPEC} --pvm-backend $(PVM_BACKEND) --telemetry localhost:$(TELEMETRY_PORT)  >logs/jamduna-$$i.log 2>&1 & \
 	done
 
 spin_0:
 	@for i in 0; do \
-		RUST_LOG=polkavm=trace,jam_node=trace $(POLKAJAM_BIN) --chain ${CHAINSPEC} run --temp --dev-validator $$i --rpc-port=$$(($(RPC_BASE_PORT) + $$i)) >logs/polkajam-$$i.log 2>&1 & \
+		RUST_LOG=polkavm=trace,jam_node=trace $(POLKAJAM_BIN) --chain ${CHAINSPEC} run --temp --dev-validator $$i --rpc-port=$$(($(RPC_BASE_PORT) + $$i)) --telemetry localhost:$(TELEMETRY_PORT) >logs/polkajam-$$i.log 2>&1 & \
 	done
 
 run_builder:
@@ -341,7 +341,7 @@ run_polkajam_all:
 		PORT=$$(($(DEFAULT_PORT) + $$i)); \
 		V_IDX=$$i; \
 		echo ">> Starting instance $$V_IDX on port $$PORT..."; \
-		$(POLKAJAM_BIN) --chain $(CHAINSPEC) --pvm-backend $(PVM_BACKEND) run  --temp  --dev-validator $$V_IDX --rpc-port=$$(($(RPC_BASE_PORT) + $$i)) & \
+		$(POLKAJAM_BIN) --chain $(CHAINSPEC) --pvm-backend $(PVM_BACKEND) run  --temp  --dev-validator $$V_IDX --rpc-port=$$(($(RPC_BASE_PORT) + $$i)) --telemetry localhost:$(TELEMETRY_PORT) & \
 	done; \
 
 run_localclient: kill jam jam_clean start_telemetry
@@ -370,7 +370,7 @@ run_localclient_jam_dead: kill jam jam_clean start_telemetry
 run_single_node:jam_clean
 	@echo "Starting single node JAM instance..."
 	@echo "Starting $(OUTPUT_DIR)/$(ARCH)/$(BINARY)... with network $(NETWORK) port $(SINGLE_NODE_PORT) start-time $(JAM_START_TIME)"
-	@$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --chain $(CHAINSPEC) --port $(SINGLE_NODE_PORT) --start-time "$(JAM_START_TIME)" --dev-validator 5
+	@$(OUTPUT_DIR)/$(ARCH)/$(BINARY) run --chain $(CHAINSPEC) --port $(SINGLE_NODE_PORT) --start-time "$(JAM_START_TIME)" --dev-validator 5 --telemetry localhost:$(TELEMETRY_PORT)
 	@echo "Instance started."
 run_parallel_jam_with_deadnode:
 	@mkdir -p logs
