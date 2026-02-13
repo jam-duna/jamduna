@@ -397,15 +397,17 @@ kill_parallel_jam:
 
 kill: kill_telemetry
 	@echo "Kill Jam Binaries(if any)..."
-	@ps aux | grep 'bin/.*[j]amduna' | awk '{print $$2}' | while read pid; do kill -9 $$pid 2>/dev/null || true; done
-	@ps aux | grep 'bin/.*[e]vm-builder' | awk '{print $$2}' | while read pid; do kill -9 $$pid 2>/dev/null || true; done
-	@ps aux | grep 'bin/.*[o]rchard-builder' | awk '{print $$2}' | while read pid; do kill -9 $$pid 2>/dev/null || true; done
+	@ps aux | grep 'bin/.*[j]amduna' | grep -v make | awk '{print $$2}' | while read pid; do kill -9 $$pid 2>/dev/null || true; done
+	@ps aux | grep 'bin/.*[e]vm-builder' | grep -v make | awk '{print $$2}' | while read pid; do kill -9 $$pid 2>/dev/null || true; done
+	@ps aux | grep 'bin/.*[o]rchard-builder' | grep -v make | awk '{print $$2}' | while read pid; do kill -9 $$pid 2>/dev/null || true; done
+	@ps aux | grep 'bin/[p]olkajam' | grep -v make | awk '{print $$2}' | while read pid; do kill -9 $$pid 2>/dev/null || true; done
 	@sleep 1
-	@ps aux | grep 'bin/.*[j]amduna' | awk '{print $$2}' | while read pid; do kill -9 $$pid 2>/dev/null || true; done
-	@ps aux | grep 'bin/.*[e]vm-builder' | awk '{print $$2}' | while read pid; do kill -9 $$pid 2>/dev/null || true; done
-	@ps aux | grep 'bin/.*[o]rchard-builder' | awk '{print $$2}' | while read pid; do kill -9 $$pid 2>/dev/null || true; done
+	@ps aux | grep 'bin/.*[j]amduna' | grep -v make | awk '{print $$2}' | while read pid; do kill -9 $$pid 2>/dev/null || true; done
+	@ps aux | grep 'bin/.*[e]vm-builder' | grep -v make | awk '{print $$2}' | while read pid; do kill -9 $$pid 2>/dev/null || true; done
+	@ps aux | grep 'bin/.*[o]rchard-builder' | grep -v make | awk '{print $$2}' | while read pid; do kill -9 $$pid 2>/dev/null || true; done
+	@ps aux | grep 'bin/[p]olkajam' | grep -v make | awk '{print $$2}' | while read pid; do kill -9 $$pid 2>/dev/null || true; done
 	@sleep 1
-	@if ps aux | grep -E 'bin/.*[j]amduna|bin/.*[e]vm-builder|bin/.*[o]rchard-builder' > /dev/null; then echo "WARNING: Some processes still running"; ps aux | grep -E 'bin/.*[j]amduna|bin/.*[e]vm-builder|bin/.*[o]rchard-builder'; else echo "All jam processes terminated."; fi
+	@if ps aux | grep -E 'bin/.*[j]amduna|bin/.*[e]vm-builder|bin/.*[o]rchard-builder|bin/[p]olkajam' | grep -v make > /dev/null; then echo "WARNING: Some processes still running"; ps aux | grep -E 'bin/.*[j]amduna|bin/.*[e]vm-builder|bin/.*[o]rchard-builder|bin/[p]olkajam' | grep -v make; else echo "All jam processes terminated."; fi
 	@echo "Process cleanup complete."
 
 

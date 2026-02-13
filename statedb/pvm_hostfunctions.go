@@ -938,18 +938,29 @@ func (vm *VM) hostFetch() {
 			v_Bytes = vm.WorkPackage.RefineContext.SerializeRefineContext()
 
 		case ALL_WORK_ITEMS_11: // all work items
-			v_Bytes = make([]byte, 0)
-			// TODO: add discriminator in front
-			for i, w := range vm.WorkPackage.WorkItems {
-				fmt.Printf("WorkItem %d: %v\n", i, types.ToJSONHex(w))
-				s_bytes, _ := w.EncodeS() // THIS IS CUSTOM ENCODING
-				v_Bytes = append(v_Bytes, s_bytes...)
+			// Graypaper: fetch(11) returns encode(var(seq(S(w))))
+			workItems := vm.WorkPackage.WorkItems
+			v_Bytes = make([]byte, 0, len(types.E(uint64(len(workItems))))+len(workItems)*58)
+			v_Bytes = append(v_Bytes, types.E(uint64(len(workItems)))...)
+			for idx := range workItems {
+				sBytes, err := workItems[idx].EncodeS()
+				if err != nil {
+					log.Warn(vm.logging, "FETCH case 11: EncodeS failed", "index", idx, "err", err)
+					v_Bytes = nil
+					break
+				}
+				v_Bytes = append(v_Bytes, sBytes...)
 			}
 
 		case SPECIFIC_WORK_ITEM_S_ENCODED_12: // S(w) for specific work item w_11
 			if omega_11 < uint64(len(vm.WorkPackage.WorkItems)) {
 				w := vm.WorkPackage.WorkItems[omega_11]
-				v_Bytes, _ = types.Encode(w)
+				sBytes, err := w.EncodeS()
+				if err != nil {
+					log.Warn(vm.logging, "FETCH case 12: EncodeS failed", "index", omega_11, "err", err)
+					break
+				}
+				v_Bytes = sBytes
 			}
 			break
 
